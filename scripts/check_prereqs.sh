@@ -22,9 +22,11 @@ RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
 CPU_N=$(nproc)
 echo "  RAM: ${RAM_MB} MB, CPU: ${CPU_N} ядер"
 if [ "$RAM_MB" -lt 2000 ]; then
-    warn "Меньше 2 ГБ RAM — Android-контейнеру может не хватить. Рекомендуется от 4 ГБ."
+    warn "Меньше 2 ГБ RAM — не хватит даже на один Android-контейнер."
+elif [ "$RAM_MB" -lt 5000 ]; then
+    warn "Хватит на один аккаунт (один redroid-контейнер), но на два одновременно (personal+ip) может быть тесно — учитывайте ещё и другие процессы на сервере."
 else
-    ok "RAM достаточно"
+    ok "RAM достаточно на оба аккаунта"
 fi
 if [ "$CPU_N" -lt 2 ]; then
     warn "1 ядро — будет тормозить. Рекомендуется от 2 ядер."
@@ -46,12 +48,14 @@ else
 fi
 
 echo
-echo "== Порт 5555 (ADB) =="
-if command -v ss >/dev/null 2>&1 && ss -tln | grep -q ':5555 '; then
-    warn "Порт 5555 уже занят другим процессом. Задайте ADB_HOST_PORT в .env на свободный порт (см. .env.example) и совпадающий ADB_DEVICE."
-else
-    ok "Порт 5555 свободен"
-fi
+echo "== Порты ADB (5555 личный, 5565 ИП) =="
+for PORT in 5555 5565; do
+    if command -v ss >/dev/null 2>&1 && ss -tln | grep -q ":${PORT} "; then
+        warn "Порт ${PORT} уже занят другим процессом. Смените соответствующую переменную ADB_HOST_PORT_* в .env (см. .env.example) и ADB_DEVICE в .env.personal/.env.ip."
+    else
+        ok "Порт ${PORT} свободен"
+    fi
+done
 
 echo
 echo "== Поддержка binder (нужна для redroid) =="

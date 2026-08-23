@@ -1,17 +1,37 @@
+## Два независимых Android-контейнера — по одному на аккаунт Госключ,
+## так как само приложение не поддерживает переключение между аккаунтами.
+## Если вам нужен только один аккаунт — просто не поднимайте второй сервис
+## (docker compose up -d redroid-personal).
+
 services:
-  redroid:
+  redroid-personal:
     image: redroid/redroid:13.0.0-latest
-    container_name: goskey-redroid
+    container_name: goskey-redroid-personal
     privileged: true
     restart: unless-stopped
     ports:
-      - "${ADB_HOST_PORT:-5555}:5555"
+      - "${ADB_HOST_PORT_PERSONAL:-5555}:5555"
     volumes:
-      - redroid-data:/data
+      - redroid-data-personal:/data
+    command:
+      - androidboot.redroid_gpu_mode=guest
+      - androidboot.use_memfd=true
+
+  redroid-ip:
+    image: redroid/redroid:13.0.0-latest
+    container_name: goskey-redroid-ip
+    privileged: true
+    restart: unless-stopped
+    ports:
+      - "${ADB_HOST_PORT_IP:-5565}:5555"
+    volumes:
+      - redroid-data-ip:/data
     command:
       - androidboot.redroid_gpu_mode=guest
       - androidboot.use_memfd=true
 
 volumes:
-  redroid-data:
-    name: goskey-redroid-data
+  redroid-data-personal:
+    name: goskey-redroid-data-personal
+  redroid-data-ip:
+    name: goskey-redroid-data-ip

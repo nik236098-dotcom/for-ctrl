@@ -1,4 +1,6 @@
 .env
+.env.personal
+.env.ip
 downloads/
 data/
 __pycache__/
