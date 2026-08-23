@@ -21,6 +21,8 @@ class Config:
     poll_interval_seconds: int
     download_dir: str
     seen_docs_file: str
+    login_alert_state_file: str
+    login_alert_cooldown_hours: float
 
     @classmethod
     def load(cls) -> "Config":
@@ -31,4 +33,6 @@ class Config:
             poll_interval_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "300")),
             download_dir=os.getenv("DOWNLOAD_DIR", "./downloads"),
             seen_docs_file=os.getenv("SEEN_DOCS_FILE", "./data/seen_docs.json"),
+            login_alert_state_file=os.getenv("LOGIN_ALERT_STATE_FILE", "./data/login_alert_state.json"),
+            login_alert_cooldown_hours=float(os.getenv("LOGIN_ALERT_COOLDOWN_HOURS", "6")),
         )

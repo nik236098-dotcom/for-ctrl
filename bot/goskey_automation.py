@@ -48,6 +48,17 @@ class GoskeyAutomation:
         # TODO: дождаться конкретного элемента главного экрана вместо app_current
         self._d.wait_activity(".MainActivity", timeout=15)  # TODO: реальное имя activity
 
+    def is_logged_in(self) -> bool:
+        """
+        Проверка, что мы не на экране входа (сессия жива).
+
+        TODO: замените на реальный признак экрана логина — например,
+        наличие кнопки "Войти через Госуслуги" или поля ввода пароля.
+        Сейчас это грубая заглушка по слову "Войти".
+        """
+        login_marker = self._d(textContains="Войти")  # TODO: точный текст/resourceId кнопки входа
+        return not login_marker.exists
+
     def open_documents_list(self) -> None:
         # TODO: заменить на реальный селектор вкладки/пункта меню "Документы"
         self._d(text="Документы").click()

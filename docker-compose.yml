@@ -14,3 +14,4 @@ services:
 
 volumes:
   redroid-data:
+    name: goskey-redroid-data
