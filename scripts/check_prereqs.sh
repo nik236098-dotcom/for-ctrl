@@ -46,6 +46,14 @@ else
 fi
 
 echo
+echo "== Порт 5555 (ADB) =="
+if command -v ss >/dev/null 2>&1 && ss -tln | grep -q ':5555 '; then
+    warn "Порт 5555 уже занят другим процессом. Задайте ADB_HOST_PORT в .env на свободный порт (см. .env.example) и совпадающий ADB_DEVICE."
+else
+    ok "Порт 5555 свободен"
+fi
+
+echo
 echo "== Поддержка binder (нужна для redroid) =="
 if [ -e /dev/binderfs ] || ls /dev/binder* >/dev/null 2>&1; then
     ok "binder-устройства уже присутствуют в системе"

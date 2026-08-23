@@ -5,7 +5,7 @@ services:
     privileged: true
     restart: unless-stopped
     ports:
-      - "5555:5555"
+      - "${ADB_HOST_PORT:-5555}:5555"
     volumes:
       - redroid-data:/data
     command:
