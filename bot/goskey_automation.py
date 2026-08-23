@@ -59,6 +59,37 @@ class GoskeyAutomation:
         login_marker = self._d(textContains="Войти")  # TODO: точный текст/resourceId кнопки входа
         return not login_marker.exists
 
+    def is_login_form(self) -> bool:
+        """
+        Экран ввода логина+пароля (первый шаг входа, до кода из SMS).
+
+        TODO: замените на реальный признак — например, наличие двух полей
+        EditText (логин/телефон и пароль) на экране входа.
+        """
+        return self._d(textContains="Войти").exists and self._d(className="android.widget.EditText").count >= 2
+
+    def fill_login_form(self, login: str, password: str) -> None:
+        # TODO: реальные resourceId полей логина/пароля и кнопки "Войти"
+        self._d(resourceId=f"{GOSKEY_PACKAGE}:id/login_input").set_text(login)
+        self._d(resourceId=f"{GOSKEY_PACKAGE}:id/password_input").set_text(password)
+        self._d(resourceId=f"{GOSKEY_PACKAGE}:id/btn_login").click()
+        self._d.sleep(2)
+
+    def is_awaiting_otp(self) -> bool:
+        """
+        Экран ввода кода из SMS (второй шаг входа).
+
+        TODO: замените на реальный признак — например, поле EditText с
+        hint'ом "Код из СМС" или конкретный resourceId экрана OTP.
+        """
+        return self._d(textContains="код").exists and self._d(className="android.widget.EditText").count == 1
+
+    def submit_otp(self, code: str) -> None:
+        # TODO: реальные resourceId поля кода и кнопки подтверждения
+        self._d(resourceId=f"{GOSKEY_PACKAGE}:id/otp_input").set_text(code)
+        self._d(resourceId=f"{GOSKEY_PACKAGE}:id/btn_confirm").click()
+        self._d.sleep(2)
+
     def open_documents_list(self) -> None:
         # TODO: заменить на реальный селектор вкладки/пункта меню "Документы"
         self._d(text="Документы").click()

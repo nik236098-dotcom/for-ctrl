@@ -23,6 +23,10 @@ class Config:
     seen_docs_file: str
     login_alert_state_file: str
     login_alert_cooldown_hours: float
+    telegram_offset_file: str
+    otp_wait_timeout_seconds: int
+    goskey_login: str | None
+    goskey_password: str | None
 
     @classmethod
     def load(cls) -> "Config":
@@ -35,4 +39,8 @@ class Config:
             seen_docs_file=os.getenv("SEEN_DOCS_FILE", "./data/seen_docs.json"),
             login_alert_state_file=os.getenv("LOGIN_ALERT_STATE_FILE", "./data/login_alert_state.json"),
             login_alert_cooldown_hours=float(os.getenv("LOGIN_ALERT_COOLDOWN_HOURS", "6")),
+            telegram_offset_file=os.getenv("TELEGRAM_OFFSET_FILE", "./data/telegram_offset.json"),
+            otp_wait_timeout_seconds=int(os.getenv("OTP_WAIT_TIMEOUT_SECONDS", "600")),
+            goskey_login=os.getenv("GOSKEY_LOGIN") or None,
+            goskey_password=os.getenv("GOSKEY_PASSWORD") or None,
         )

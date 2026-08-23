@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bot.config import Config
 from bot.goskey_automation import GoskeyAutomation
-from bot.telegram import TelegramSender
+from bot.telegram import TelegramClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,16 +46,50 @@ def clear_login_alert_state(state_file: str) -> None:
     Path(state_file).unlink(missing_ok=True)
 
 
-def run_once(cfg: Config, automation: GoskeyAutomation, telegram: TelegramSender, seen: set[str]) -> set[str]:
+def try_recover_login(cfg: Config, automation: GoskeyAutomation, telegram: TelegramClient) -> bool:
+    """
+    Пытается восстановить сессию без похода в scrcpy:
+      1. если открылась форма логин+пароль — заполняет её из .env
+         (если GOSKEY_LOGIN/GOSKEY_PASSWORD не заданы, тут дальше идти нельзя);
+      2. если приложение просит код из SMS — спрашивает его в Telegram
+         и ждёт ваш ответ (SIM всегда при вас, как вы и предлагали).
+    Возвращает True, если в итоге залогинены, False — если восстановить
+    не вышло (тогда остаётся только ручной вход через scrcpy).
+    """
+    if automation.is_logged_in():
+        return True
+
+    if automation.is_login_form():
+        if not (cfg.goskey_login and cfg.goskey_password):
+            log.warning("Экран логина, но GOSKEY_LOGIN/GOSKEY_PASSWORD не заданы в .env")
+            return False
+        log.info("Заполняю форму логина автоматически")
+        automation.fill_login_form(cfg.goskey_login, cfg.goskey_password)
+
+    if automation.is_awaiting_otp():
+        telegram.send_message(
+            "🔐 Госключ просит код из SMS для входа. Пришлите его в ответ "
+            "сюда одним сообщением (просто цифры)."
+        )
+        code = telegram.wait_for_reply(cfg.telegram_offset_file, cfg.otp_wait_timeout_seconds)
+        if not code:
+            telegram.send_message(f"Не дождался кода за {cfg.otp_wait_timeout_seconds // 60} мин, попробую позже.")
+            return False
+        log.info("Код получен от пользователя, ввожу")
+        automation.submit_otp(code)
+
+    return automation.is_logged_in()
+
+
+def run_once(cfg: Config, automation: GoskeyAutomation, telegram: TelegramClient, seen: set[str]) -> set[str]:
     automation.ensure_app_open()
 
-    if not automation.is_logged_in():
-        log.warning("Сессия Госключ не активна — нужен ручной вход через scrcpy")
+    if not try_recover_login(cfg, automation, telegram):
+        log.warning("Сессия Госключ не активна и не восстановлена автоматически")
         if should_send_login_alert(cfg.login_alert_state_file, cfg.login_alert_cooldown_hours):
             telegram.send_message(
-                "⚠️ Сессия Госключ слетела. Нужен ручной вход через scrcpy "
-                "(см. README, п.4). Пока не войдёте — новые документы "
-                "проверяться не будут."
+                "⚠️ Не смог восстановить сессию Госключ автоматически. Нужен "
+                "ручной вход через scrcpy (см. README, п.4)."
             )
             mark_login_alert_sent(cfg.login_alert_state_file)
         return seen
@@ -89,7 +123,7 @@ def run_once(cfg: Config, automation: GoskeyAutomation, telegram: TelegramSender
 def main() -> None:
     cfg = Config.load()
     automation = GoskeyAutomation(cfg.adb_device)
-    telegram = TelegramSender(cfg.telegram_bot_token, cfg.telegram_chat_id)
+    telegram = TelegramClient(cfg.telegram_bot_token, cfg.telegram_chat_id)
     seen = load_seen(cfg.seen_docs_file)
 
     log.info("Старт: проверка каждые %d сек", cfg.poll_interval_seconds)
