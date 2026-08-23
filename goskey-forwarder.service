@@ -1,0 +1,16 @@
+[Unit]
+Description=Goskey document forwarder
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# TODO: укажите реальный путь после клонирования репозитория на VDS
+WorkingDirectory=/opt/goskey-forwarder
+ExecStart=/opt/goskey-forwarder/venv/bin/python -m bot.poller
+Restart=on-failure
+RestartSec=15
+User=%i
+
+[Install]
+WantedBy=multi-user.target

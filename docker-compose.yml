@@ -1,0 +1,16 @@
+services:
+  redroid:
+    image: redroid/redroid:13.0.0-latest
+    container_name: goskey-redroid
+    privileged: true
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    volumes:
+      - redroid-data:/data
+    command:
+      - androidboot.redroid_gpu_mode=guest
+      - androidboot.use_memfd=true
+
+volumes:
+  redroid-data:
