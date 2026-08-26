@@ -23,7 +23,7 @@ object ConfigStore {
         }
         return runCatching {
             context.assets.open(FILE_NAME).use { it.readBytes().toString(Charsets.UTF_8) }
-        }.getOrNull()?.takeIf { it.isNotBlank() && !it.startsWith("# PLACEHOLDER") }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
     fun isImported(context: Context): Boolean = importedFile(context).exists()
@@ -39,10 +39,6 @@ object ConfigStore {
         // Проверяем, что это действительно конфиг WireGuard, до сохранения.
         parse(text)
         save(context, text)
-    }
-
-    fun clear(context: Context) {
-        importedFile(context).delete()
     }
 
     fun parse(text: String): Config =
