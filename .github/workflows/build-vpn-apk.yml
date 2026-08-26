@@ -1,0 +1,53 @@
+name: Сборка APK RU VPN
+
+on:
+  push:
+    paths:
+      - "vpn/android/**"
+      - ".github/workflows/build-vpn-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Компоненты Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      # Если в секретах репозитория лежит WG_CONFIG (содержимое клиентского
+      # .conf), он вшивается в APK — приложение подключится в одно нажатие.
+      # Без секрета собирается «пустой» APK, конфиг импортируется в самом
+      # приложении.
+      - name: Встроить конфиг из секрета
+        env:
+          WG_CONFIG: ${{ secrets.WG_CONFIG }}
+        run: |
+          if [ -n "$WG_CONFIG" ]; then
+            printf '%s' "$WG_CONFIG" > vpn/android/app/src/main/assets/wg.conf
+            echo "конфиг встроен в сборку"
+          else
+            echo "секрет WG_CONFIG не задан — собираем без встроенного конфига"
+          fi
+
+      - name: Сборка debug-APK
+        working-directory: vpn/android
+        run: gradle --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruvpn-debug-apk
+          path: vpn/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

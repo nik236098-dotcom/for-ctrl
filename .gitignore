@@ -7,3 +7,12 @@ __pycache__/
 *.pyc
 venv/
 *.apk
+
+# Android-клиент VPN
+vpn/android/.gradle/
+vpn/android/build/
+vpn/android/app/build/
+vpn/android/local.properties
+vpn/android/app/src/main/assets/wg.conf
+*.keystore
+*.jks

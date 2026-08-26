@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RU VPN</string>
+
+    <string name="status_connected">Подключено</string>
+    <string name="status_disconnected">Отключено</string>
+
+    <string name="connect">Подключиться</string>
+    <string name="disconnect">Отключиться</string>
+
+    <string name="server_none">Сервер: конфиг не загружен</string>
+    <string name="server_value">Сервер: %1$s</string>
+
+    <string name="config_source_missing">Загрузите файл конфигурации с сервера</string>
+    <string name="config_source_imported">Конфиг: импортирован в приложение</string>
+    <string name="config_source_bundled">Конфиг: вшит в APK при сборке</string>
+
+    <string name="traffic_idle">Трафик: —</string>
+    <string name="traffic_value">Трафик: ↓ %1$s / ↑ %2$s</string>
+
+    <string name="check_ip">Проверить мой IP</string>
+    <string name="ip_unknown">IP: не проверялся</string>
+    <string name="ip_checking">IP: проверяем…</string>
+    <string name="ip_result">IP: %1$s (%2$s)</string>
+    <string name="ip_error">Не удалось проверить IP: %1$s</string>
+
+    <string name="config_section">Конфигурация</string>
+    <string name="import_file">Импортировать файл .conf</string>
+    <string name="import_text">Вставить текст конфига</string>
+    <string name="paste_title">Конфиг WireGuard</string>
+    <string name="paste_hint">[Interface]\nPrivateKey = …</string>
+    <string name="save">Сохранить</string>
+    <string name="cancel">Отмена</string>
+
+    <string name="config_imported">Конфиг сохранён</string>
+    <string name="error_no_config">Нет конфига: импортируйте .conf с сервера</string>
+    <string name="error_bad_config">Конфиг не разобран: %1$s</string>
+    <string name="error_permission_denied">Без разрешения на VPN подключение невозможно</string>
+    <string name="error_connect">Не удалось подключиться: %1$s</string>
+    <string name="error_disconnect">Не удалось отключиться: %1$s</string>
+</resources>
