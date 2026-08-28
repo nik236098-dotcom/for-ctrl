@@ -36,7 +36,9 @@ grep -q "^### client ${NAME}\$" "$CONF" && die "клиент '${NAME}' уже е
 BASE4="$(echo "$WG_SUBNET" | cut -d/ -f1 | sed 's/\.[0-9]*$//')"
 BASE6="$(echo "$WG_SUBNET6" | cut -d/ -f1)"
 NEXT=2
-for octet in $(grep -E '^\s*AllowedIPs' "$CONF" \
+# Считаем и закомментированные строки тоже: у приостановленного клиента
+# адрес остаётся за ним, иначе после возобновления будет конфликт.
+for octet in $(grep -E '^[[:space:]]*#?[[:space:]]*AllowedIPs' "$CONF" \
         | grep -oE "$(echo "$BASE4" | sed 's/\./\\./g')\.[0-9]+" \
         | awk -F. '{print $4}' | sort -n); do
     (( octet >= NEXT )) && NEXT=$(( octet + 1 ))

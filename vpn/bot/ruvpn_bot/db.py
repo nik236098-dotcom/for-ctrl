@@ -21,9 +21,10 @@ CREATE TABLE IF NOT EXISTS devices (
     client_name TEXT PRIMARY KEY,
     tg_id       INTEGER NOT NULL REFERENCES users(tg_id),
     title       TEXT NOT NULL,
-    ip          TEXT,
-    created_at  TEXT NOT NULL,
-    revoked_at  TEXT
+    ip           TEXT,
+    created_at   TEXT NOT NULL,
+    suspended_at TEXT,
+    revoked_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS invites (
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS payments (
     tg_id      INTEGER NOT NULL,
     amount     TEXT NOT NULL,
     asset      TEXT NOT NULL,
+    days       INTEGER NOT NULL,
     status     TEXT NOT NULL,
     created_at TEXT NOT NULL,
     paid_at    TEXT
@@ -81,7 +83,12 @@ class Device:
     title: str
     ip: str | None
     created_at: datetime
+    suspended_at: datetime | None
     revoked_at: datetime | None
+
+    @property
+    def suspended(self) -> bool:
+        return self.suspended_at is not None
 
 
 class Storage:
@@ -169,6 +176,13 @@ class Storage:
         assert device is not None
         return device
 
+    def mark_device_suspended(self, client_name: str, suspended: bool) -> None:
+        self._db.execute(
+            "UPDATE devices SET suspended_at = ? WHERE client_name = ?",
+            (_iso(utcnow()) if suspended else None, client_name),
+        )
+        self._db.commit()
+
     def mark_device_revoked(self, client_name: str) -> None:
         self._db.execute(
             "UPDATE devices SET revoked_at = ? WHERE client_name = ?",
@@ -209,12 +223,14 @@ class Storage:
 
     # --- платежи --------------------------------------------------------
 
-    def add_payment(self, invoice_id: str, tg_id: int, amount: str, asset: str) -> None:
+    def add_payment(
+        self, invoice_id: str, tg_id: int, amount: str, asset: str, days: int
+    ) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO payments"
-            " (invoice_id, tg_id, amount, asset, status, created_at)"
-            " VALUES (?, ?, ?, ?, 'active', ?)",
-            (invoice_id, tg_id, amount, asset, _iso(utcnow())),
+            " (invoice_id, tg_id, amount, asset, days, status, created_at)"
+            " VALUES (?, ?, ?, ?, ?, 'active', ?)",
+            (invoice_id, tg_id, amount, asset, days, _iso(utcnow())),
         )
         self._db.commit()
 
@@ -232,6 +248,14 @@ class Storage:
         )
         self._db.commit()
         return cursor.rowcount == 1
+
+    def paid_totals(self) -> list[tuple[str, str, int]]:
+        """Сколько и в чём получено: [(актив, сумма, число платежей)]."""
+        rows = self._db.execute(
+            "SELECT asset, SUM(CAST(amount AS REAL)) AS total, COUNT(*) AS count"
+            " FROM payments WHERE status = 'paid' GROUP BY asset"
+        ).fetchall()
+        return [(row["asset"], f"{row['total']:g}", row["count"]) for row in rows]
 
     # --- разбор строк ---------------------------------------------------
 
@@ -253,5 +277,6 @@ class Storage:
             title=row["title"],
             ip=row["ip"],
             created_at=_parse(row["created_at"]),
+            suspended_at=_parse(row["suspended_at"]) if row["suspended_at"] else None,
             revoked_at=_parse(row["revoked_at"]) if row["revoked_at"] else None,
         )

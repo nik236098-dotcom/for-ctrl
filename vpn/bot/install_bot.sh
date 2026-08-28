@@ -8,7 +8,7 @@
 #   * копирует vpn/server и vpn/bot в /opt/ruvpn (владелец root — чтобы
 #     никто, кроме root, не мог подменить скрипты, которые бот зовёт с sudo);
 #   * заводит системного пользователя ruvpnbot без домашнего каталога и шелла;
-#   * даёт ему через sudoers ровно четыре команды и ничего больше;
+#   * даёт ему через sudoers ровно шесть команд и ничего больше;
 #   * поднимает systemd-сервис.
 #
 set -euo pipefail
@@ -57,6 +57,8 @@ WG_BIN="$(command -v wg)"
 cat > /etc/sudoers.d/ruvpn-bot <<EOF
 ${BOT_USER} ALL=(root) NOPASSWD: ${DEST}/server/add_client.sh, \\
     ${DEST}/server/show_client.sh, \\
+    ${DEST}/server/suspend_client.sh, \\
+    ${DEST}/server/resume_client.sh, \\
     ${DEST}/server/remove_client.sh, \\
     ${WG_BIN} show ${WG_IFACE} allowed-ips, \\
     ${WG_BIN} show ${WG_IFACE} transfer

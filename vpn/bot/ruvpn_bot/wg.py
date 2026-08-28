@@ -58,6 +58,17 @@ class Wireguard:
             _run, ["sudo", "-n", self._script("show_client.sh"), name]
         )
 
+    async def suspend_client(self, name: str) -> None:
+        """Снимает пира с интерфейса, сохраняя его ключ до оплаты."""
+        await asyncio.to_thread(
+            _run, ["sudo", "-n", self._script("suspend_client.sh"), name]
+        )
+
+    async def resume_client(self, name: str) -> None:
+        await asyncio.to_thread(
+            _run, ["sudo", "-n", self._script("resume_client.sh"), name]
+        )
+
     async def remove_client(self, name: str) -> None:
         await asyncio.to_thread(
             _run, ["sudo", "-n", self._script("remove_client.sh"), name]

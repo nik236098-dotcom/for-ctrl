@@ -11,13 +11,12 @@ from aiogram import Bot, Dispatcher
 
 from . import config as config_module
 from .db import Storage
-from .handlers import Deps, revoke_all, router
+from .handlers import Deps, notify, resume_devices, router, suspend_devices
 from .payments import CryptoPay, CryptoPayError
-from .wg import Wireguard, WgError
+from .wg import Wireguard
 
 log = logging.getLogger("ruvpn_bot")
 
-EXPIRY_CHECK_SECONDS = 3600
 PAYMENT_CHECK_SECONDS = 60
 WARN_DAYS_BEFORE = 3
 
@@ -34,42 +33,51 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip())
 
 
-async def expiry_watch(bot: Bot, deps: Deps) -> None:
-    """Предупреждает об окончании доступа и снимает ключи у просроченных."""
+async def enforce_terms(bot: Bot, deps: Deps) -> None:
+    """Следит за сроками: истёк — ключи выключаются, оплачен — включаются.
+
+    Крутится каждую минуту, поэтому «лишнего» времени человек получает
+    минуты, а не сутки.
+    """
     while True:
         try:
             for user in deps.db.users():
+                devices = deps.db.devices(user.tg_id)
+                if not devices:
+                    continue
+
                 if user.active:
+                    # Страховка на случай, если оплату применили, а ключи
+                    # включить не вышло: тихо доводим до нужного состояния.
+                    if any(device.suspended for device in devices):
+                        resumed = await resume_devices(deps, user.tg_id)
+                        if resumed:
+                            log.info("включено ключей у %s: %s", user.tg_id, resumed)
                     if user.days_left <= WARN_DAYS_BEFORE and user.warned_at is None:
                         deps.db.mark_warned(user.tg_id)
                         await notify(
                             bot,
                             user.tg_id,
-                            f"Доступ заканчивается через {user.days_left} дн. "
-                            + ("Продлить: /pay" if deps.cfg.payments_enabled else ""),
+                            f"Доступ заканчивается: {user.days_left} дн. "
+                            "Продлить — /pay",
                         )
-                elif deps.db.devices(user.tg_id):
-                    count = await revoke_all(deps, user.tg_id)
-                    log.info("доступ %s истёк, отозвано ключей: %s", user.tg_id, count)
+                elif any(not device.suspended for device in devices):
+                    stopped = await suspend_devices(deps, user.tg_id)
+                    log.info("срок %s истёк, выключено ключей: %s", user.tg_id, stopped)
                     await notify(
                         bot,
                         user.tg_id,
-                        "Доступ закончился, ключи отозваны. "
-                        + (
-                            "Продлить: /pay"
-                            if deps.cfg.payments_enabled
-                            else "За продлением — к владельцу сервера."
-                        ),
+                        "Срок доступа закончился, ключи выключены.\n"
+                        "Оплатите /pay — те же ключи включатся сами, "
+                        "переустанавливать ничего не нужно.",
                     )
-        except WgError as exc:
-            log.warning("проверка сроков: сервер ответил ошибкой: %s", exc)
         except Exception:
             log.exception("проверка сроков сорвалась")
-        await asyncio.sleep(EXPIRY_CHECK_SECONDS)
+        await asyncio.sleep(deps.cfg.enforce_interval)
 
 
 async def payments_watch(bot: Bot, deps: Deps) -> None:
-    """Опрашивает Crypto Pay: оплаченный счёт продлевает доступ."""
+    """Опрашивает CryptoBot: оплаченный счёт продлевает доступ и включает ключи."""
     assert deps.crypto is not None
     while True:
         try:
@@ -83,29 +91,25 @@ async def payments_watch(bot: Bot, deps: Deps) -> None:
                     if status == "paid" and deps.db.close_payment(
                         row["invoice_id"], "paid"
                     ):
-                        user = deps.db.extend(row["tg_id"], deps.cfg.sub_days)
-                        await notify(
-                            bot,
-                            row["tg_id"],
-                            f"Оплата получена, доступ продлён до "
-                            f"{user.expires_at.astimezone():%d.%m.%Y}.\n"
-                            "Ключ остался прежним — ничего переустанавливать не нужно.",
+                        user = deps.db.extend(row["tg_id"], row["days"])
+                        resumed = await resume_devices(deps, row["tg_id"])
+                        text = (
+                            f"Оплата получена, доступ до "
+                            f"{user.expires_at.astimezone():%d.%m.%Y %H:%M}."
                         )
+                        text += (
+                            "\nКлючи снова работают — те же самые."
+                            if resumed
+                            else "\n/key — получить ключ."
+                        )
+                        await notify(bot, row["tg_id"], text)
                     elif status == "expired":
                         deps.db.close_payment(row["invoice_id"], "expired")
         except CryptoPayError as exc:
-            log.warning("Crypto Pay недоступен: %s", exc)
+            log.warning("CryptoBot недоступен: %s", exc)
         except Exception:
             log.exception("проверка платежей сорвалась")
         await asyncio.sleep(PAYMENT_CHECK_SECONDS)
-
-
-async def notify(bot: Bot, tg_id: int, text: str) -> None:
-    try:
-        await bot.send_message(tg_id, text)
-    except Exception as exc:
-        # Человек мог заблокировать бота — это не повод падать.
-        log.info("не доставлено %s: %s", tg_id, exc)
 
 
 async def main() -> None:
@@ -128,13 +132,20 @@ async def main() -> None:
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
-    tasks = [asyncio.create_task(expiry_watch(bot, deps))]
+    tasks = [asyncio.create_task(enforce_terms(bot, deps))]
     if deps.crypto is not None:
         tasks.append(asyncio.create_task(payments_watch(bot, deps)))
+        if cfg.crypto_pay_testnet:
+            log.warning("оплата в ТЕСТОВОЙ сети — счета идут в @CryptoTestnetBot")
     else:
         log.info("оплата не настроена — доступ продлевает админ командой /extend")
 
-    log.info("бот запущен, админов: %s", len(cfg.admin_ids))
+    log.info(
+        "бот запущен: тарифов %s, пробных дней %s, проверка сроков раз в %s с",
+        len(cfg.plans),
+        cfg.trial_days,
+        cfg.enforce_interval,
+    )
     try:
         await dispatcher.start_polling(bot, deps=deps)
     finally:
