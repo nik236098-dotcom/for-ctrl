@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Телефонная будка. Сгенерировано из общего шаблона: окно светится. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="168dp"
+    android:viewportWidth="100"
+    android:viewportHeight="140">
+
+    <!-- крыша -->
+    <path
+        android:fillColor="@color/booth_roof"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M10,14 L90,14 L86,28 L14,28 Z" />
+    <!-- вывеска: буквы намечены штрихами, как на старых будках -->
+    <path
+        android:fillColor="@color/mustard"
+        android:pathData="M26,17 L30,17 L30,25 L26,25 Z M34,17 L38,17 L38,25 L34,25 Z M42,17 L46,17 L46,25 L42,25 Z M50,17 L54,17 L54,25 L50,25 Z M58,17 L62,17 L62,25 L58,25 Z M66,17 L70,17 L70,25 L66,25 Z" />
+
+    <!-- корпус -->
+    <path
+        android:fillColor="@color/booth_body"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M14,28 L86,28 L86,130 L14,130 Z" />
+
+    <!-- стекло -->
+    <path
+        android:fillColor="@color/booth_glass_on"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M22,36 L78,36 L78,92 L22,92 Z" />
+    <!-- переплёт рамы -->
+    <path
+        android:fillColor="@color/ink"
+        android:pathData="M49,36 L51,36 L51,92 L49,92 Z M22,63 L78,63 L78,65 L22,65 Z" />
+
+    <!-- дверная ручка -->
+    <path
+        android:fillColor="@color/mustard"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="1.5"
+        android:pathData="M70,104 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <!-- филёнка двери -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="1.5"
+        android:pathData="M26,100 L60,100 L60,122 L26,122 Z" />
+
+    <!-- основание -->
+    <path
+        android:fillColor="@color/booth_base"
+        android:pathData="M8,130 L92,130 L92,138 L8,138 Z" />
+</vector>

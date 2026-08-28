@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон экрана: тёплая бумага с мелким зерном, как на плёнке. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <color android:color="@color/paper" />
+    </item>
+    <item>
+        <bitmap
+            android:gravity="fill"
+            android:src="@drawable/paper_grain"
+            android:tileMode="repeat" />
+    </item>
+</layer-list>

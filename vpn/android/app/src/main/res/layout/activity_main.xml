@@ -3,26 +3,88 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:background="@drawable/bg_paper"
+    android:fillViewport="true"
+    android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="28dp"
+        android:paddingBottom="32dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
+            android:fontFamily="@font/kelly_slab"
+            android:letterSpacing="0.08"
             android:text="@string/app_name"
-            android:textAppearance="?attr/textAppearanceHeadlineSmall" />
+            android:textColor="@color/ink"
+            android:textSize="38sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="@font/pt_sans"
+            android:letterSpacing="0.04"
+            android:text="@string/subtitle"
+            android:textColor="@color/ink_soft"
+            android:textSize="15sp" />
+
+        <!-- Будка: окно загорается, когда туннель поднят. -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="176dp"
+            android:layout_marginTop="8dp">
+
+            <ImageView
+                android:id="@+id/imageBooth"
+                android:layout_width="118dp"
+                android:layout_height="166dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/booth_description"
+                android:src="@drawable/booth_off" />
+
+            <ImageView
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="22dp"
+                android:contentDescription="@null"
+                android:src="@drawable/orange" />
+
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="54dp"
+                android:layout_marginBottom="2dp"
+                android:contentDescription="@null"
+                android:src="@drawable/orange" />
+
+            <ImageView
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_gravity="bottom|end"
+                android:layout_marginEnd="30dp"
+                android:contentDescription="@null"
+                android:src="@drawable/orange" />
+        </FrameLayout>
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            app:cardCornerRadius="16dp">
+            android:layout_marginTop="12dp"
+            app:cardBackgroundColor="@color/card"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/ink"
+            app:strokeWidth="2dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -34,56 +96,92 @@
                     android:id="@+id/textStatus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:fontFamily="@font/kelly_slab"
                     android:text="@string/status_disconnected"
-                    android:textAppearance="?attr/textAppearanceTitleLarge" />
+                    android:textColor="@color/red"
+                    android:textSize="26sp" />
 
                 <TextView
                     android:id="@+id/textServer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
+                    android:fontFamily="@font/pt_sans"
                     android:text="@string/server_none"
-                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    android:textColor="@color/ink"
+                    android:textSize="15sp" />
 
                 <TextView
                     android:id="@+id/textConfigSource"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:alpha="0.7"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="@font/pt_sans"
                     android:text="@string/config_source_missing"
-                    android:textAppearance="?attr/textAppearanceBodySmall" />
+                    android:textColor="@color/ink_soft"
+                    android:textSize="13sp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="@drawable/divider_dashed"
+                    android:layerType="software" />
 
                 <TextView
                     android:id="@+id/textTraffic"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:fontFamily="@font/pt_sans"
                     android:text="@string/traffic_idle"
-                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    android:textColor="@color/ink"
+                    android:textSize="15sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/buttonToggle"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginTop="24dp"
-            android:text="@string/connect"
-            android:textSize="18sp"
-            app:cornerRadius="16dp" />
+        <!-- Главная кнопка: большая, круглая, с ободком. -->
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp">
+
+            <View
+                android:layout_width="196dp"
+                android:layout_height="196dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_ring" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonToggle"
+                android:layout_width="168dp"
+                android:layout_height="168dp"
+                android:layout_gravity="center"
+                android:fontFamily="@font/kelly_slab"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="@string/connect"
+                android:textAllCaps="false"
+                android:textColor="@color/paper"
+                android:textSize="21sp"
+                app:backgroundTint="@color/orange"
+                app:cornerRadius="84dp"
+                app:elevation="0dp"
+                app:strokeColor="@color/ink"
+                app:strokeWidth="3dp" />
+        </FrameLayout>
 
         <ProgressBar
             android:id="@+id/progress"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
             android:layout_marginTop="12dp"
+            android:indeterminateTint="@color/ink_soft"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonCheckIp"
-            style="@style/Widget.Material3.Button.TonalButton"
+            style="@style/Widget.RuVPN.Button.Flat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
@@ -93,37 +191,43 @@
             android:id="@+id/textIp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
+            android:fontFamily="@font/pt_sans"
+            android:gravity="center"
             android:text="@string/ip_unknown"
-            android:textAppearance="?attr/textAppearanceBodyMedium" />
+            android:textColor="@color/ink"
+            android:textSize="15sp" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="24dp"
-            android:background="?attr/colorOutlineVariant" />
+            android:layout_marginTop="26dp"
+            android:background="@drawable/divider_dashed"
+            android:layerType="software" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="20dp"
+            android:fontFamily="@font/kelly_slab"
             android:text="@string/config_section"
-            android:textAppearance="?attr/textAppearanceTitleSmall" />
+            android:textColor="@color/ink"
+            android:textSize="20sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonImportFile"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.RuVPN.Button.Flat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:text="@string/import_file" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonImportText"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.RuVPN.Button.Flat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:text="@string/import_text" />
     </LinearLayout>
 </ScrollView>

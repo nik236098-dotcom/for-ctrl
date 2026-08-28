@@ -1,6 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="status_up">#2E7D32</color>
-    <color name="status_down">#B3261E</color>
-    <color name="ic_launcher_background">#0B3D91</color>
+    <!-- Палитра под кукольный мультфильм конца 60-х: тёплая бумага,
+         выгоревшие краски, никаких чистых цветов. -->
+    <color name="paper">#F4E4C4</color>
+    <color name="paper_deep">#E9D2A4</color>
+    <color name="card">#FBF1DA</color>
+    <color name="ink">#3E2C1E</color>
+    <color name="ink_soft">#7A6146</color>
+    <color name="hairline">#D8C199</color>
+
+    <color name="green">#4F7A3A</color>
+    <color name="orange">#DE7019</color>
+    <color name="red">#B23A2E</color>
+    <color name="mustard">#E8B33C</color>
+
+    <!-- Цвета иллюстрации: одинаковые в светлой и тёмной теме. -->
+    <color name="booth_body">#4F7A3A</color>
+    <color name="booth_roof">#B23A2E</color>
+    <color name="booth_base">#3E2C1E</color>
+    <color name="booth_glass_off">#8C9A82</color>
+    <color name="booth_glass_on">#F2C14E</color>
+    <color name="fruit">#DE7019</color>
+    <color name="leaf">#4F7A3A</color>
+
+    <color name="ic_launcher_background">#F4E4C4</color>
 </resources>

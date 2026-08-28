@@ -22,6 +22,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
+    /** Пока идёт подключение, статус показывает «Строим, строим…». */
+    private var busy = false
+
     /** Разрешение системы на VpnService — спрашивается один раз на установку. */
     private val vpnPermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -172,11 +175,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun render(state: Tunnel.State) {
         val up = state == Tunnel.State.UP
-        binding.textStatus.setText(if (up) R.string.status_connected else R.string.status_disconnected)
-        binding.textStatus.setTextColor(
-            getColor(if (up) R.color.status_up else R.color.status_down),
-        )
+        if (!busy) {
+            binding.textStatus.setText(
+                if (up) R.string.status_connected else R.string.status_disconnected,
+            )
+            binding.textStatus.setTextColor(getColor(if (up) R.color.green else R.color.red))
+        }
         binding.buttonToggle.setText(if (up) R.string.disconnect else R.string.connect)
+        // Окно будки светится ровно тогда, когда туннель поднят.
+        binding.imageBooth.setImageResource(if (up) R.drawable.booth_on else R.drawable.booth_off)
 
         val config = currentConfig()
         binding.textServer.text = when {
@@ -206,8 +213,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setBusy(busy: Boolean) {
+        this.busy = busy
         binding.buttonToggle.isEnabled = !busy
         binding.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
+        if (busy) {
+            binding.textStatus.setText(R.string.status_connecting)
+            binding.textStatus.setTextColor(getColor(R.color.ink_soft))
+        } else {
+            render(VpnManager.state.value)
+        }
     }
 
     private fun toast(text: String) {
