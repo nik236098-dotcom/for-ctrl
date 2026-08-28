@@ -16,3 +16,8 @@ vpn/android/local.properties
 vpn/android/app/src/main/assets/wg.conf
 *.keystore
 *.jks
+
+# Телеграм-бот выдачи ключей
+vpn/bot/venv/
+vpn/bot/.env
+*.db
