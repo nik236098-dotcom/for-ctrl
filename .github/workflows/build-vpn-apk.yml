@@ -7,6 +7,10 @@ on:
       - ".github/workflows/build-vpn-apk.yml"
   workflow_dispatch:
 
+# Нужно для публикации APK в релиз.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -51,3 +55,20 @@ jobs:
           name: ruvpn-debug-apk
           path: vpn/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Готовый APK кладём в релиз с постоянным тегом ruvpn-latest —
+      # оттуда его можно скачать по прямой ссылке, в том числе с телефона.
+      - name: Публикация APK в релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp vpn/android/app/build/outputs/apk/debug/app-debug.apk ruvpn-debug.apk
+          gh release delete ruvpn-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ruvpn-latest ruvpn-debug.apk \
+            --target "$GITHUB_SHA" \
+            --title "RU VPN — debug APK" \
+            --notes "Клиент WireGuard для Android, собран из коммита $GITHUB_SHA.
+
+          Конфиг внутрь не вшит: после установки импортируйте .conf,
+          который выдаёт vpn/server/add_client.sh на вашем сервере.
+          Подпись отладочная — для личного устройства этого достаточно."
