@@ -1,9 +1,12 @@
 package ru.forctrl.ruvpn
 
-import android.net.Uri
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.VpnService
 import android.os.Bundle
+import android.view.View
 import android.widget.EditText
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -25,7 +28,7 @@ class MainActivity : AppCompatActivity() {
     /** Пока идёт подключение, статус показывает «Строим, строим…». */
     private var busy = false
 
-    /** Разрешение системы на VpnService — спрашивается один раз на установку. */
+    /** Разрешение системы на VPN — спрашивается один раз на установку. */
     private val vpnPermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -36,12 +39,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val pickConfig = registerForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri: Uri? ->
-        if (uri != null) importConfig(uri)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -50,10 +47,7 @@ class MainActivity : AppCompatActivity() {
         VpnManager.init(this)
 
         binding.buttonToggle.setOnClickListener { onToggleClicked() }
-        binding.buttonImportFile.setOnClickListener {
-            pickConfig.launch(arrayOf("*/*"))
-        }
-        binding.buttonImportText.setOnClickListener { showPasteDialog() }
+        binding.buttonKey.setOnClickListener { showKeyDialog() }
         binding.buttonCheckIp.setOnClickListener { checkIp() }
 
         lifecycleScope.launch {
@@ -84,7 +78,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (currentConfig() == null) {
-            toast(getString(R.string.error_no_config))
+            toast(getString(R.string.error_no_key))
+            showKeyDialog()
             return
         }
         val intent = VpnService.prepare(this)
@@ -97,7 +92,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun connect() {
         val config = currentConfig() ?: run {
-            toast(getString(R.string.error_no_config))
+            toast(getString(R.string.error_no_key))
             return
         }
         setBusy(true)
@@ -117,38 +112,47 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun importConfig(uri: Uri) {
-        runCatching { ConfigStore.saveFrom(this, uri) }
-            .onSuccess {
-                toast(getString(R.string.config_imported))
-                render(VpnManager.state.value)
-            }
-            .onFailure { toast(getString(R.string.error_bad_config, it.messageOrClass())) }
-    }
-
-    private fun showPasteDialog() {
+    /**
+     * Единственный способ завести ключ: вставить строку из бота. Если она
+     * уже в буфере обмена — подставляем сразу, чтобы осталось нажать «Готово».
+     */
+    private fun showKeyDialog() {
         val input = EditText(this).apply {
-            hint = getString(R.string.paste_hint)
+            hint = getString(R.string.key_dialog_hint)
             setPadding(48, 32, 48, 32)
-            minLines = 6
+            minLines = 3
+            clipboardKey()?.let { setText(it) }
         }
+
         AlertDialog.Builder(this)
-            .setTitle(R.string.paste_title)
+            .setTitle(R.string.key_dialog_title)
+            .setMessage(R.string.key_dialog_help)
             .setView(input)
-            .setPositiveButton(R.string.save) { _, _ ->
-                val text = input.text.toString()
-                runCatching {
-                    ConfigStore.parse(text)
-                    ConfigStore.save(this, text)
-                }
-                    .onSuccess {
-                        toast(getString(R.string.config_imported))
-                        render(VpnManager.state.value)
-                    }
-                    .onFailure { toast(getString(R.string.error_bad_config, it.messageOrClass())) }
-            }
+            .setPositiveButton(R.string.done) { _, _ -> saveKey(input.text.toString()) }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun saveKey(text: String) {
+        runCatching {
+            KeyStore.parse(text)
+            KeyStore.save(this, text)
+        }
+            .onSuccess {
+                toast(getString(R.string.key_saved))
+                render(VpnManager.state.value)
+            }
+            .onFailure { toast(getString(R.string.error_bad_key)) }
+    }
+
+    private fun clipboardKey(): String? {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val text = clipboard?.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(this)
+            ?.toString()
+        return text?.takeIf { KeyStore.looksLikeKey(it) }?.trim()
     }
 
     private fun checkIp() {
@@ -156,9 +160,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             runCatching { IpChecker.lookup() }
                 .onSuccess { result ->
-                    val ruMark = if (result.countryCode.equals("RU", ignoreCase = true)) " ✅" else " ⚠️"
+                    val mark = if (result.countryCode.equals("RU", ignoreCase = true)) " ✅" else " ⚠️"
                     binding.textIp.text =
-                        getString(R.string.ip_result, result.ip, result.country) + ruMark
+                        getString(R.string.ip_result, result.ip, result.country) + mark
                 }
                 .onFailure {
                     binding.textIp.text = getString(R.string.ip_error, it.messageOrClass())
@@ -169,8 +173,8 @@ class MainActivity : AppCompatActivity() {
     // --- отрисовка ----------------------------------------------------------
 
     private fun currentConfig(): Config? {
-        val text = ConfigStore.rawText(this) ?: return null
-        return runCatching { ConfigStore.parse(text) }.getOrNull()
+        val text = KeyStore.rawText(this) ?: return null
+        return runCatching { KeyStore.parse(text) }.getOrNull()
     }
 
     private fun render(state: Tunnel.State) {
@@ -182,22 +186,25 @@ class MainActivity : AppCompatActivity() {
             binding.textStatus.setTextColor(getColor(if (up) R.color.green else R.color.red))
         }
         binding.buttonToggle.setText(if (up) R.string.disconnect else R.string.connect)
-        // Окно будки светится ровно тогда, когда туннель поднят.
+
+        // Окно будки светится, а герой улыбается ровно тогда, когда связь есть.
         binding.imageBooth.setImageResource(if (up) R.drawable.booth_on else R.drawable.booth_off)
+        binding.imageHero.setImageResource(if (up) R.drawable.hero_on else R.drawable.hero_off)
 
         val config = currentConfig()
-        binding.textServer.text = when {
-            config == null -> getString(R.string.server_none)
-            else -> getString(R.string.server_value, ConfigStore.endpointOf(config))
+        binding.textServer.text = when (config) {
+            null -> getString(R.string.server_none)
+            else -> getString(R.string.server_value, KeyStore.endpointOf(config))
         }
-        binding.textConfigSource.text = getString(
-            if (config == null) {
-                R.string.config_source_missing
-            } else if (ConfigStore.isImported(this)) {
-                R.string.config_source_imported
-            } else {
-                R.string.config_source_bundled
+        binding.textKeyState.setText(
+            when {
+                config == null -> R.string.key_missing
+                KeyStore.isOwn(this) -> R.string.key_own
+                else -> R.string.key_bundled
             },
+        )
+        binding.buttonKey.setText(
+            if (config == null) R.string.paste_key else R.string.replace_key,
         )
         if (!up) binding.textTraffic.text = getString(R.string.traffic_idle)
     }
@@ -215,7 +222,7 @@ class MainActivity : AppCompatActivity() {
     private fun setBusy(busy: Boolean) {
         this.busy = busy
         binding.buttonToggle.isEnabled = !busy
-        binding.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
+        binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
         if (busy) {
             binding.textStatus.setText(R.string.status_connecting)
             binding.textStatus.setTextColor(getColor(R.color.ink_soft))
@@ -225,7 +232,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toast(text: String) {
-        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_LONG).show()
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show()
     }
 
     private fun Throwable.messageOrClass(): String =

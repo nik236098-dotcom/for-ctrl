@@ -36,45 +36,29 @@
             android:textColor="@color/ink_soft"
             android:textSize="15sp" />
 
-        <!-- Будка: окно загорается, когда туннель поднят. -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="176dp"
-            android:layout_marginTop="8dp">
+        <!-- Будка и герой: окно горит и герой улыбается, когда связь есть. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="bottom"
+            android:orientation="horizontal">
 
             <ImageView
                 android:id="@+id/imageBooth"
-                android:layout_width="118dp"
-                android:layout_height="166dp"
-                android:layout_gravity="center"
-                android:contentDescription="@string/booth_description"
+                android:layout_width="96dp"
+                android:layout_height="134dp"
+                android:contentDescription="@null"
                 android:src="@drawable/booth_off" />
 
             <ImageView
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:layout_gravity="bottom|start"
-                android:layout_marginStart="22dp"
-                android:contentDescription="@null"
-                android:src="@drawable/orange" />
-
-            <ImageView
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:layout_gravity="bottom|start"
-                android:layout_marginStart="54dp"
-                android:layout_marginBottom="2dp"
-                android:contentDescription="@null"
-                android:src="@drawable/orange" />
-
-            <ImageView
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_gravity="bottom|end"
-                android:layout_marginEnd="30dp"
-                android:contentDescription="@null"
-                android:src="@drawable/orange" />
-        </FrameLayout>
+                android:id="@+id/imageHero"
+                android:layout_width="118dp"
+                android:layout_height="148dp"
+                android:layout_marginStart="-6dp"
+                android:contentDescription="@string/hero_description"
+                android:src="@drawable/hero_off" />
+        </LinearLayout>
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -112,12 +96,12 @@
                     android:textSize="15sp" />
 
                 <TextView
-                    android:id="@+id/textConfigSource"
+                    android:id="@+id/textKeyState"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:fontFamily="@font/pt_sans"
-                    android:text="@string/config_source_missing"
+                    android:text="@string/key_missing"
                     android:textColor="@color/ink_soft"
                     android:textSize="13sp" />
 
@@ -205,29 +189,13 @@
             android:background="@drawable/divider_dashed"
             android:layerType="software" />
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonKey"
+            style="@style/Widget.RuVPN.Button.Flat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:fontFamily="@font/kelly_slab"
-            android:text="@string/config_section"
-            android:textColor="@color/ink"
-            android:textSize="20sp" />
+            android:text="@string/paste_key" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/buttonImportFile"
-            style="@style/Widget.RuVPN.Button.Flat"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="@string/import_file" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/buttonImportText"
-            style="@style/Widget.RuVPN.Button.Flat"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="@string/import_text" />
     </LinearLayout>
 </ScrollView>

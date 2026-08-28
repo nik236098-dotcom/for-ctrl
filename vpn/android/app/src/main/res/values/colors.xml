@@ -20,6 +20,10 @@
     <color name="booth_base">#3E2C1E</color>
     <color name="booth_glass_off">#8C9A82</color>
     <color name="booth_glass_on">#F2C14E</color>
+    <color name="fur">#A0662F</color>
+    <color name="fur_dark">#7A4A20</color>
+    <color name="fur_light">#D2A06A</color>
+    <color name="eye_white">#F7ECD5</color>
     <color name="fruit">#DE7019</color>
     <color name="leaf">#4F7A3A</color>
 

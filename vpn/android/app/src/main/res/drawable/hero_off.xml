@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ушастый герой у телефонной будки. Состояние: связи нет.
+     Сгенерировано из общего шаблона, правьте генератор, а не файл. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="150dp"
+    android:viewportWidth="120"
+    android:viewportHeight="150">
+
+    <!-- ноги -->
+    <path android:fillColor="@color/fur_dark" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M45,132 m-14,0 a14,8 0 1,0 28,0 a14,8 0 1,0 -28,0" />
+    <path android:fillColor="@color/fur_dark" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M75,132 m-14,0 a14,8 0 1,0 28,0 a14,8 0 1,0 -28,0" />
+
+    <!-- уши: главная примета, поэтому крупные и позади головы -->
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2.5"
+        android:pathData="M26,46 m-25,0 a25,25 0 1,0 50,0 a25,25 0 1,0 -50,0" />
+    <path android:fillColor="@color/fur_light"
+        android:pathData="M26,46 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2.5"
+        android:pathData="M94,46 m-25,0 a25,25 0 1,0 50,0 a25,25 0 1,0 -50,0" />
+    <path android:fillColor="@color/fur_light"
+        android:pathData="M94,46 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+
+    <!-- туловище -->
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2.5"
+        android:pathData="M60,105 m-27,0 a27,27 0 1,0 54,0 a27,27 0 1,0 -54,0" />
+    <!-- лапы -->
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M31,104 m-10,0 a10,13 0 1,0 20,0 a10,13 0 1,0 -20,0" />
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M89,104 m-10,0 a10,13 0 1,0 20,0 a10,13 0 1,0 -20,0" />
+
+    <!-- голова -->
+    <path android:fillColor="@color/fur" android:strokeColor="@color/ink"
+        android:strokeWidth="2.5"
+        android:pathData="M60,54 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
+    <!-- мордочка -->
+    <path android:fillColor="@color/fur_light"
+        android:pathData="M60,66 m-21,0 a21,16 0 1,0 42,0 a21,16 0 1,0 -42,0" />
+
+    <!-- глаза -->
+    <path android:fillColor="@color/eye_white" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M48,50 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path android:fillColor="@color/eye_white" android:strokeColor="@color/ink"
+        android:strokeWidth="2"
+        android:pathData="M72,50 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path android:fillColor="@color/ink"
+        android:pathData="M49,51 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+    <path android:fillColor="@color/ink"
+        android:pathData="M73,51 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M47,48.5 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M71,48.5 m-1.8,0 a1.8,1.8 0 1,0 3.6,0 a1.8,1.8 0 1,0 -3.6,0" />
+
+    <!-- нос -->
+    <path android:fillColor="@color/ink"
+        android:pathData="M60,62 m-6.5,0 a6.5,5 0 1,0 13,0 a6.5,5 0 1,0 -13,0" />
+
+    <!-- рот -->
+    <path android:fillColor="#00000000" android:strokeColor="@color/ink"
+        android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M50,77 Q60,70 70,77" />
+</vector>

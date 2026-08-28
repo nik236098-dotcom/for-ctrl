@@ -10,12 +10,12 @@
     <string name="connect">Соединить</string>
     <string name="disconnect">Разъединить</string>
 
-    <string name="server_none">Куда звоним: конфиг не загружен</string>
-    <string name="server_value">Куда звоним: %1$s</string>
+    <string name="server_none">Ключ пока не вставлен</string>
+    <string name="server_value">Сервер: %1$s</string>
 
-    <string name="config_source_missing">Конфига ещё нет — загрузите его ниже</string>
-    <string name="config_source_imported">Конфиг: свой, импортированный</string>
-    <string name="config_source_bundled">Конфиг: вшит в приложение</string>
+    <string name="key_missing">Возьмите ключ у бота и вставьте его сюда</string>
+    <string name="key_own">Ключ на месте</string>
+    <string name="key_bundled">Ключ уже внутри приложения</string>
 
     <string name="traffic_idle">Принято — · Отправлено —</string>
     <string name="traffic_value">Принято %1$s · Отправлено %2$s</string>
@@ -26,20 +26,20 @@
     <string name="ip_result">Видно из: %1$s (%2$s)</string>
     <string name="ip_error">Не вышло посмотреть: %1$s</string>
 
-    <string name="config_section">Настройки связи</string>
-    <string name="import_file">Взять конфиг из файла</string>
-    <string name="import_text">Вписать конфиг вручную</string>
-    <string name="paste_title">Конфиг WireGuard</string>
-    <string name="paste_hint">[Interface]\nPrivateKey = …</string>
-    <string name="save">Сохранить</string>
+    <string name="paste_key">Вставить ключ</string>
+    <string name="replace_key">Заменить ключ</string>
+    <string name="key_dialog_title">Ключ доступа</string>
+    <string name="key_dialog_hint">ruvpn://…</string>
+    <string name="key_dialog_help">Скопируйте ключ в боте и нажмите «Готово» — он подставится сам.</string>
+    <string name="done">Готово</string>
     <string name="cancel">Отмена</string>
 
-    <string name="config_imported">Конфиг сохранён</string>
-    <string name="error_no_config">Конфига нет: загрузите тот, что выдал сервер</string>
-    <string name="error_bad_config">Конфиг не разобран: %1$s</string>
+    <string name="key_saved">Ключ сохранён</string>
+    <string name="error_no_key">Сначала вставьте ключ — его выдаёт бот</string>
+    <string name="error_bad_key">Это не похоже на ключ. Скопируйте его из бота целиком.</string>
     <string name="error_permission_denied">Без разрешения на VPN связи не будет</string>
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
 
-    <string name="booth_description">Телефонная будка: окно светится, когда связь есть</string>
+    <string name="hero_description">Герой у телефонной будки: улыбается, когда связь есть</string>
 </resources>

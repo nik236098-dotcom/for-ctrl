@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import html
 import logging
 from dataclasses import dataclass
@@ -229,29 +230,38 @@ async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
         return
 
     deps.db.add_device(name, user.tg_id, title, ip)
-    await send_config(message, deps, title, config_text)
+    await send_key(message, deps, title, config_text)
 
 
-async def send_config(message: Message, deps: Deps, title: str, config_text: str) -> None:
-    """Отдаёт конфиг файлом и QR-кодом. В конфиге лежит приватный ключ."""
-    document = BufferedInputFile(
-        config_text.encode(), filename=f"ruvpn-{title}.conf".replace(" ", "-")
+def make_key(config_text: str) -> str:
+    """Упаковывает настройки туннеля в одну строку — это и есть «ключ».
+
+    Пользователю не нужно знать, что внутри: он копирует строку из чата и
+    вставляет её в приложении одной кнопкой.
+    """
+    payload = base64.urlsafe_b64encode(config_text.encode()).decode()
+    return f"ruvpn://{payload}"
+
+
+async def send_key(message: Message, deps: Deps, title: str, config_text: str) -> None:
+    """Отдаёт ключ строкой (жмите — копируется) и QR для сторонних приложений."""
+    key = make_key(config_text)
+    app_line = (
+        f"\n\nПриложение: {deps.cfg.apk_url}" if deps.cfg.apk_url else ""
     )
-    sent = await message.answer_document(
-        document,
-        caption=(
-            f"Ключ для «{html.escape(title)}».\n\n"
-            "В приложении RU VPN: «Взять конфиг из файла».\n"
-            "В приложении WireGuard: «+» → импорт файла или скан QR ниже.\n\n"
-            "Ключ личный: на другом устройстве он не заработает одновременно."
-        ),
+    sent = await message.answer(
+        f"Ключ для «{html.escape(title)}». Нажмите на него — скопируется:\n\n"
+        f"<code>{key}</code>\n\n"
+        "Дальше: откройте приложение → «Вставить ключ» → «Соединить»."
+        f"{app_line}",
+        parse_mode="HTML",
     )
 
     png = await qr_png(config_text)
     if png is not None:
         await message.answer_photo(
             BufferedInputFile(png, filename="ruvpn-qr.png"),
-            caption="Тот же ключ QR-кодом",
+            caption="Если пользуетесь приложением WireGuard — отсканируйте этот код.",
         )
 
     ttl = deps.cfg.config_message_ttl_minutes

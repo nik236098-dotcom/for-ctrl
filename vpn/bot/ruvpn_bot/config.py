@@ -65,6 +65,7 @@ class Config:
     db_path: Path
     wg_iface: str
     config_message_ttl_minutes: int
+    apk_url: str
 
     @property
     def payments_enabled(self) -> bool:
@@ -101,4 +102,5 @@ def load() -> Config:
         db_path=Path(os.getenv("DB_PATH", "/var/lib/ruvpn-bot/bot.db")),
         wg_iface=os.getenv("WG_IFACE", "wg0").strip(),
         config_message_ttl_minutes=_int("CONFIG_MESSAGE_TTL_MINUTES", 0),
+        apk_url=os.getenv("APK_URL", "").strip(),
     )
