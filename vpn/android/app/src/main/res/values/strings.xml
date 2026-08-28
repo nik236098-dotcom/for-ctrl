@@ -41,5 +41,5 @@
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
 
-    <string name="hero_description">Герой у телефонной будки: улыбается, когда связь есть</string>
+    <string name="hero_description">Крокодил Гена у телефонной будки: улыбается, когда связь есть</string>
 </resources>

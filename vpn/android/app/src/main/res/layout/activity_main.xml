@@ -46,16 +46,16 @@
 
             <ImageView
                 android:id="@+id/imageBooth"
-                android:layout_width="96dp"
-                android:layout_height="134dp"
+                android:layout_width="98dp"
+                android:layout_height="140dp"
                 android:contentDescription="@null"
                 android:src="@drawable/booth_off" />
 
             <ImageView
                 android:id="@+id/imageHero"
-                android:layout_width="118dp"
-                android:layout_height="148dp"
-                android:layout_marginStart="-6dp"
+                android:layout_width="132dp"
+                android:layout_height="172dp"
+                android:layout_marginStart="-10dp"
                 android:contentDescription="@string/hero_description"
                 android:src="@drawable/hero_off" />
         </LinearLayout>
