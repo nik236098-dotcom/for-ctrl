@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RU VPN</string>
-    <string name="subtitle">домашняя линия связи</string>
+    <string name="subtitle">канал связи</string>
 
-    <string name="status_connected">Есть связь!</string>
-    <string name="status_connecting">Строим, строим…</string>
-    <string name="status_disconnected">Связи нет</string>
+    <string name="status_connected">Канал открыт</string>
+    <string name="status_connecting">Наводим связь…</string>
+    <string name="status_disconnected">Канал закрыт</string>
 
     <string name="connect">Соединить</string>
     <string name="disconnect">Разъединить</string>
@@ -41,5 +41,5 @@
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
 
-    <string name="hero_description">Крокодил Гена у телефонной будки: улыбается, когда связь есть</string>
+    <string name="power_button_description">Кнопка соединения</string>
 </resources>

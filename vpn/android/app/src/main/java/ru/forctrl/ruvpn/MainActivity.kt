@@ -24,8 +24,9 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var powerButton: PowerButtonAnimator
 
-    /** Пока идёт подключение, статус показывает «Строим, строим…». */
+    /** Пока идёт подключение или отключение, статус показывает «Наводим связь…». */
     private var busy = false
 
     /** Разрешение системы на VPN — спрашивается один раз на установку. */
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         VpnManager.init(this)
+        powerButton = PowerButtonAnimator(binding.imagePowerGlow, binding.imageRing)
 
         binding.buttonToggle.setOnClickListener { onToggleClicked() }
         binding.buttonKey.setOnClickListener { showKeyDialog() }
@@ -67,7 +69,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        powerButton.onLifecycleResume()
         lifecycleScope.launch { VpnManager.refreshState() }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Вращение ободка — чистая косметика, крутить его, когда экран не
+        // виден, только сажать батарею.
+        powerButton.onLifecyclePause()
     }
 
     // --- действия -----------------------------------------------------------
@@ -179,17 +189,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun render(state: Tunnel.State) {
         val up = state == Tunnel.State.UP
+
+        val visual = when {
+            busy -> PowerVisualState.CONNECTING
+            up -> PowerVisualState.UP
+            else -> PowerVisualState.OFF
+        }
+        powerButton.apply(visual)
+
         if (!busy) {
             binding.textStatus.setText(
                 if (up) R.string.status_connected else R.string.status_disconnected,
             )
             binding.textStatus.setTextColor(getColor(if (up) R.color.green else R.color.red))
         }
-        binding.buttonToggle.setText(if (up) R.string.disconnect else R.string.connect)
-
-        // Окно будки светится, а герой улыбается ровно тогда, когда связь есть.
-        binding.imageBooth.setImageResource(if (up) R.drawable.booth_on else R.drawable.booth_off)
-        binding.imageHero.setImageResource(if (up) R.drawable.hero_on else R.drawable.hero_off)
+        binding.buttonToggle.contentDescription =
+            getString(if (up) R.string.disconnect else R.string.connect)
 
         val config = currentConfig()
         binding.textServer.text = when (config) {
@@ -226,6 +241,7 @@ class MainActivity : AppCompatActivity() {
         if (busy) {
             binding.textStatus.setText(R.string.status_connecting)
             binding.textStatus.setTextColor(getColor(R.color.ink_soft))
+            powerButton.apply(PowerVisualState.CONNECTING)
         } else {
             render(VpnManager.state.value)
         }

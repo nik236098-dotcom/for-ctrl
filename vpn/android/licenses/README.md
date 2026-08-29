@@ -2,7 +2,7 @@
 
 В приложении используются шрифты под лицензией SIL Open Font License 1.1:
 
-- **Kelly Slab** (Cyreal) — заголовки. Лицензия: `OFL-KellySlab.txt`
+- **Play** (Jonas Karlsson) — заголовки и кнопки, техничный геометричный рисунок под космическую тему. Лицензия: `OFL-Play.txt`
 - **PT Sans** (ParaType) — основной текст. Лицензия: `OFL-PTSans.txt`
 
 Файлы шрифтов лежат в `app/src/main/res/font/`. OFL разрешает
