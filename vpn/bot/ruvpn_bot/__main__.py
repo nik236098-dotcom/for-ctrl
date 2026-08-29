@@ -23,10 +23,22 @@ WARN_DAYS_BEFORE = 3
 
 
 def load_dotenv(path: Path) -> None:
-    """Читает .env для запуска руками; под systemd это делает EnvironmentFile."""
-    if not path.exists():
+    """Читает .env для запуска руками; под systemd это делает EnvironmentFile.
+
+    .env специально root:600 — токен бота не должен читать никто, кроме
+    root. Systemd сам подставляет переменные процессу до сброса прав
+    (EnvironmentFile=), а вот этот ручной путь читает файл уже от имени
+    урезанного ruvpnbot и на боевом сервере закономерно получит
+    PermissionError — под systemd так и должно быть, тут просто нечего
+    делать (переменные уже на месте), а не падать.
+    """
+    try:
+        if not path.exists():
+            return
+        text = path.read_text()
+    except PermissionError:
         return
-    for line in path.read_text().splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
