@@ -68,6 +68,7 @@ class Config:
     apk_url: str
     key_server_host: str
     key_server_port: int
+    telegram_proxy: str
 
     @property
     def payments_enabled(self) -> bool:
@@ -107,4 +108,5 @@ def load() -> Config:
         apk_url=os.getenv("APK_URL", "").strip(),
         key_server_host=os.getenv("KEY_SERVER_HOST", "0.0.0.0").strip(),
         key_server_port=_int("KEY_SERVER_PORT", 8081),
+        telegram_proxy=os.getenv("TELEGRAM_PROXY", "").strip(),
     )

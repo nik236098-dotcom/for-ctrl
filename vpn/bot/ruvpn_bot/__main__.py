@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from . import config as config_module
+from .config import Config
 from .db import Storage
 from .handlers import Deps, notify, resume_devices, router, suspend_devices
 from .keyserver import start as start_keyserver
@@ -17,6 +19,20 @@ from .payments import CryptoPay, CryptoPayError
 from .wg import Wireguard
 
 log = logging.getLogger("ruvpn_bot")
+
+
+def build_bot(cfg: Config) -> Bot:
+    """Клиент Telegram Bot API — через прокси, если задан TELEGRAM_PROXY.
+
+    С российского IP доступ к api.telegram.org иногда режется у хостера
+    (тот же случай, что и в других проектах) — тогда бот у себя работает,
+    а обновления от Telegram просто не доходят. AiohttpSession понимает и
+    http(s)://, и socks5://; для socks5 нужен пакет aiohttp_socks (уже в
+    requirements.txt).
+    """
+    if not cfg.telegram_proxy:
+        return Bot(cfg.bot_token)
+    return Bot(cfg.bot_token, session=AiohttpSession(proxy=cfg.telegram_proxy))
 
 PAYMENT_CHECK_SECONDS = 60
 WARN_DAYS_BEFORE = 3
@@ -141,7 +157,7 @@ async def main() -> None:
         else None,
     )
 
-    bot = Bot(cfg.bot_token)
+    bot = build_bot(cfg)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
