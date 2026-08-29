@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,25 +98,6 @@ class Wireguard:
             if len(parts) == 3 and parts[0] in ip_by_key:
                 result[ip_by_key[parts[0]]] = Transfer(int(parts[1]), int(parts[2]))
         return result
-
-
-async def qr_png(text: str) -> bytes | None:
-    """QR-код конфига картинкой. None, если qrencode не установлен."""
-    if shutil.which("qrencode") is None:
-        return None
-
-    def encode() -> bytes:
-        result = subprocess.run(
-            ["qrencode", "-t", "PNG", "-o", "-", "-s", "6", "-m", "2"],
-            input=text.encode(),
-            capture_output=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise WgError(result.stderr.decode().strip() or "qrencode не смог")
-        return result.stdout
-
-    return await asyncio.to_thread(encode)
 
 
 def human_bytes(value: int) -> str:

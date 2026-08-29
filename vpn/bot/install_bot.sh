@@ -30,7 +30,7 @@ source /etc/wireguard/ruvpn.params
 info "Ставим зависимости"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip sudo qrencode >/dev/null
+apt-get install -y -qq python3 python3-venv python3-pip sudo >/dev/null
 
 info "Копируем в ${DEST}"
 mkdir -p "$DEST"

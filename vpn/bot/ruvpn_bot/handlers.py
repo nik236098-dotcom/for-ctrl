@@ -13,7 +13,6 @@ from datetime import datetime
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
-    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -23,7 +22,7 @@ from aiogram.types import (
 from .config import Config, Plan
 from .db import Storage, User
 from .payments import CryptoPay, CryptoPayError
-from .wg import Wireguard, WgError, human_bytes, qr_png
+from .wg import Wireguard, WgError, human_bytes
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -76,6 +75,21 @@ def plans_keyboard(cfg: Config) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def key_keyboard(has_devices: bool = False) -> InlineKeyboardMarkup:
+    text = "🔑 Ещё ключ" if has_devices else "🔑 Получить ключ"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=text, callback_data="get_key")]]
+    )
+
+
+def status_keyboard(cfg: Config, has_devices: bool) -> InlineKeyboardMarkup:
+    """Кнопка ключа + (если оплата настроена) тарифы — одной клавиатурой."""
+    rows = list(key_keyboard(has_devices).inline_keyboard)
+    if cfg.payments_enabled:
+        rows += plans_keyboard(cfg).inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _greeting(cfg: Config) -> str:
     lines = [
         "VPN с российским IP: сайты и приложения видят вас из России.",
@@ -116,7 +130,8 @@ async def cmd_start(message: Message, command: CommandObject, deps: Deps) -> Non
         greeting = _greeting(deps.cfg)
         if deps.cfg.trial_days:
             await message.answer(
-                greeting + "\n\nПробный доступ включён. /key — получить ключ."
+                greeting + "\n\nПробный доступ включён.",
+                reply_markup=key_keyboard(),
             )
         else:
             await message.answer(
@@ -154,16 +169,14 @@ async def cmd_status(message: Message, deps: Deps) -> None:
             elif used is not None:
                 parts.append(f"— ↓{human_bytes(used.received)} ↑{human_bytes(used.sent)}")
             lines.append(" ".join(parts))
-        lines += ["", "/key — ещё ключ, /drop N — удалить ключ №N"]
-    else:
-        lines += ["", "Ключей пока нет: /key — получить."]
+        lines += ["", "/drop N — удалить ключ №N"]
 
     if not user.active:
         lines += ["", "Ключи выключены. Оплатите — включатся сами, те же самые."]
 
     await message.answer(
         "\n".join(lines),
-        reply_markup=plans_keyboard(deps.cfg) if deps.cfg.payments_enabled else None,
+        reply_markup=status_keyboard(deps.cfg, bool(devices)),
     )
 
 
@@ -180,9 +193,10 @@ async def plain_invite_code(message: Message, deps: Deps) -> None:
         message.from_user.id, message.from_user.username, deps.cfg.trial_days
     )
     await message.answer(
-        f"Доступ открыт на {deps.cfg.trial_days} дн.\n\n/key — получить ключ."
+        f"Доступ открыт на {deps.cfg.trial_days} дн."
         if deps.cfg.trial_days
-        else "Приглашение принято. Выберите тариф: /pay"
+        else "Приглашение принято. Выберите тариф:",
+        reply_markup=key_keyboard() if deps.cfg.trial_days else plans_keyboard(deps.cfg),
     )
 
 
@@ -191,7 +205,25 @@ async def plain_invite_code(message: Message, deps: Deps) -> None:
 
 @router.message(Command("key"))
 async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
-    user = deps.db.user(message.from_user.id)
+    await issue_key(message, deps, message.from_user.id, command.args or "")
+
+
+@router.callback_query(F.data == "get_key")
+async def cb_get_key(callback: CallbackQuery, deps: Deps) -> None:
+    """Та же выдача ключа, но по кнопке — не всем удобно печатать /key."""
+    await callback.answer()
+    if callback.message is not None:
+        await issue_key(callback.message, deps, callback.from_user.id, "")
+
+
+async def issue_key(message: Message, deps: Deps, tg_id: int, title_arg: str) -> None:
+    """Общая логика выдачи ключа — дёргается и из /key, и из кнопки «Получить ключ».
+
+    Кнопка присылает нажатие через CallbackQuery, где message — это
+    сообщение БОТА (у него message.from_user был бы сам бот), поэтому tg_id
+    настоящего человека передаём отдельно, а не берём из message.
+    """
+    user = deps.db.user(tg_id)
     if user is None:
         await message.answer("Нажмите /start, чтобы начать.")
         return
@@ -203,7 +235,7 @@ async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
         )
         return
 
-    devices = deps.db.devices(user.tg_id)
+    devices = deps.db.devices(tg_id)
     if len(devices) >= deps.cfg.max_devices:
         await message.answer(
             f"Уже выдано ключей: {len(devices)} из {deps.cfg.max_devices}.\n"
@@ -211,16 +243,16 @@ async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
         )
         return
 
-    title = ((command.args or "").strip() or f"устройство {len(devices) + 1}")[:40]
+    title = (title_arg.strip() or f"устройство {len(devices) + 1}")[:40]
 
     used = {
         device.client_name
-        for device in deps.db.devices(user.tg_id, include_revoked=True)
+        for device in deps.db.devices(tg_id, include_revoked=True)
     }
     index = 0
-    while _device_name(user.tg_id, index) in used:
+    while _device_name(tg_id, index) in used:
         index += 1
-    name = _device_name(user.tg_id, index)
+    name = _device_name(tg_id, index)
 
     try:
         ip = await deps.wg.add_client(name)
@@ -230,7 +262,7 @@ async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
         await message.answer(f"Сервер не смог выдать ключ: {exc}")
         return
 
-    deps.db.add_device(name, user.tg_id, title, ip)
+    deps.db.add_device(name, tg_id, title, ip)
     await send_key(message, deps, name, title, config_text)
 
 
@@ -244,19 +276,22 @@ def make_key(deps: Deps, client_name: str, config_text: str) -> str:
     Само содержимое туннеля (приватный ключ, адрес сервера) в 8 символов не
     упаковать — оно остаётся на сервере, а ключ лишь указывает на запись:
     приложение вставляет его один раз, конфиг сервер ключей отдаёт сам.
+
+    Без префикса вида ruvpn:// — он приложению не нужен: короткие
+    буквенно-цифровые коды оно и так узнаёт как ключ (см. KeyStore.kt).
     """
     while True:
         code = "".join(secrets.choice(_KEY_ALPHABET) for _ in range(_KEY_LENGTH))
         if not deps.db.key_exists(code):
             break
     deps.db.store_key(code, client_name, config_text)
-    return f"ruvpn://{code}"
+    return code
 
 
 async def send_key(
     message: Message, deps: Deps, client_name: str, title: str, config_text: str
 ) -> None:
-    """Отдаёт ключ строкой (жмите — копируется) и QR для сторонних приложений."""
+    """Отдаёт ключ строкой — нажатие копирует его целиком."""
     key = make_key(deps, client_name, config_text)
     app_line = (
         f"\n\nПриложение: {deps.cfg.apk_url}" if deps.cfg.apk_url else ""
@@ -268,13 +303,6 @@ async def send_key(
         f"{app_line}",
         parse_mode="HTML",
     )
-
-    png = await qr_png(config_text)
-    if png is not None:
-        await message.answer_photo(
-            BufferedInputFile(png, filename="ruvpn-qr.png"),
-            caption="Если пользуетесь приложением WireGuard — отсканируйте этот код.",
-        )
 
     ttl = deps.cfg.config_message_ttl_minutes
     if ttl > 0:
