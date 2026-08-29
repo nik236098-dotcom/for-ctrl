@@ -51,6 +51,31 @@ object KeyStore {
         savedFile(context).writeText(text.trim())
     }
 
+    /**
+     * Тестовый ключ — только чтобы посмотреть анимацию кнопки, без
+     * настоящего подключения. Не конфиг тунеля, поэтому [parse] на нём
+     * закономерно падает — [MainActivity] проверяет [isDemo] раньше, чем
+     * дойти до реального конфига.
+     */
+    const val DEMO_KEY = "test1590"
+    private const val DEMO_SENTINEL = "demo:$DEMO_KEY"
+
+    fun isDemoKey(text: String): Boolean {
+        val value = text.trim()
+        val payload = if (value.startsWith(PREFIX, ignoreCase = true)) {
+            value.substring(PREFIX.length).trim()
+        } else {
+            value
+        }
+        return payload.equals(DEMO_KEY, ignoreCase = true)
+    }
+
+    fun saveDemo(context: Context) {
+        savedFile(context).writeText(DEMO_SENTINEL)
+    }
+
+    fun isDemo(context: Context): Boolean = rawText(context) == DEMO_SENTINEL
+
     /** Быстрая проверка «похоже на ключ» — чтобы подставлять из буфера обмена. */
     fun looksLikeKey(text: String?): Boolean {
         val value = text?.trim() ?: return false

@@ -21,7 +21,8 @@
     <string name="replace_key">Заменить ключ</string>
     <string name="key_dialog_title">Ключ доступа</string>
     <string name="key_dialog_hint">ruvpn://…</string>
-    <string name="key_dialog_help">Скопируйте ключ в боте и нажмите «Готово» — он подставится сам.</string>
+    <string name="key_dialog_help">Вставьте ключ, который прислал бот</string>
+    <string name="paste_from_clipboard">Вставить из буфера</string>
     <string name="done">Готово</string>
     <string name="cancel">Отмена</string>
 

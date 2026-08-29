@@ -5,7 +5,7 @@ import android.content.Context
 import android.net.VpnService
 import android.os.Bundle
 import android.view.View
-import android.widget.EditText
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.forctrl.ruvpn.databinding.ActivityMainBinding
+import ru.forctrl.ruvpn.databinding.DialogKeyBinding
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -28,6 +29,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Пока идёт подключение или отключение, статус показывает «Наводим связь…». */
     private var busy = false
+
+    /** Тестовый ключ (см. [KeyStore.DEMO_KEY]): включён ли визуально — без реального тунеля. */
+    private var demoUp = false
 
     /** Разрешение системы на VPN — спрашивается один раз на установку. */
     private val vpnPermission = registerForActivityResult(
@@ -81,6 +85,10 @@ class MainActivity : AppCompatActivity() {
     // --- действия -----------------------------------------------------------
 
     private fun onToggleClicked() {
+        if (KeyStore.isDemo(this)) {
+            toggleDemo()
+            return
+        }
         if (VpnManager.state.value == Tunnel.State.UP) {
             disconnect()
             return
@@ -95,6 +103,24 @@ class MainActivity : AppCompatActivity() {
             vpnPermission.launch(intent)
         } else {
             connect()
+        }
+    }
+
+    /**
+     * Тестовый ключ: только анимация кнопки, никакого реального тунеля —
+     * ни VpnManager, ни разрешения на VPN, ни проверки IP.
+     */
+    private fun toggleDemo() {
+        if (demoUp) {
+            demoUp = false
+            render(VpnManager.state.value)
+            return
+        }
+        setBusy(true)
+        lifecycleScope.launch {
+            delay(900)
+            demoUp = true
+            setBusy(false)
         }
     }
 
@@ -125,31 +151,50 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Единственный способ завести ключ: вставить строку из бота. Если она
-     * уже в буфере обмена — подставляем сразу, чтобы осталось нажать «Готово».
+     * уже в буфере обмена — подставляем сразу; можно и явно нажать
+     * «Вставить из буфера» — на случай, если автоопределение промахнулось.
      */
     private fun showKeyDialog() {
-        val input = EditText(this).apply {
-            hint = getString(R.string.key_dialog_hint)
-            setPadding(48, 32, 48, 32)
-            minLines = 3
-            clipboardKey()?.let { setText(it) }
+        val dialogBinding = DialogKeyBinding.inflate(layoutInflater)
+        dialogBinding.inputKey.setText(clipboardText(onlyIfLooksLikeKey = true) ?: "")
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogBinding.root)
+            .create()
+        // Своя карточка со скруглёнными углами вместо системной рамки диалога.
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        dialogBinding.buttonPasteClipboard.setOnClickListener {
+            clipboardText(onlyIfLooksLikeKey = false)?.let { dialogBinding.inputKey.setText(it) }
+        }
+        dialogBinding.textCancel.setOnClickListener { dialog.dismiss() }
+        dialogBinding.textDone.setOnClickListener {
+            saveKey(dialogBinding.inputKey.text.toString())
+            dialog.dismiss()
         }
 
-        AlertDialog.Builder(this)
-            .setTitle(R.string.key_dialog_title)
-            .setMessage(R.string.key_dialog_help)
-            .setView(input)
-            .setPositiveButton(R.string.done) { _, _ -> saveKey(input.text.toString()) }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.88).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
     }
 
     /**
      * Ключ, который вставляют — короткий код (8 символов): настоящие
      * настройки тунеля запрашиваются у сервера ключей один раз, здесь же
      * и сохраняются — дальше подключение работает офлайн.
+     *
+     * Тестовый ключ (см. [KeyStore.DEMO_KEY]) — особый случай: никуда не
+     * стучимся, просто запоминаем, что включена демонстрация анимации.
      */
     private fun saveKey(text: String) {
+        if (KeyStore.isDemoKey(text)) {
+            KeyStore.saveDemo(this)
+            toast(getString(R.string.key_saved))
+            render(VpnManager.state.value)
+            return
+        }
         lifecycleScope.launch {
             runCatching {
                 val resolved = KeyStore.resolve(text)
@@ -165,14 +210,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun clipboardKey(): String? {
+    /** [onlyIfLooksLikeKey] — для автоподстановки при открытии; false — для явной кнопки «Вставить». */
+    private fun clipboardText(onlyIfLooksLikeKey: Boolean): String? {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         val text = clipboard?.primaryClip
             ?.takeIf { it.itemCount > 0 }
             ?.getItemAt(0)
             ?.coerceToText(this)
             ?.toString()
-        return text?.takeIf { KeyStore.looksLikeKey(it) }?.trim()
+            ?.trim()
+        return if (onlyIfLooksLikeKey) text?.takeIf { KeyStore.looksLikeKey(it) } else text
     }
 
     /** Ваш ip показывается всегда, без отдельной кнопки — обновляется само. */
@@ -205,7 +252,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render(state: Tunnel.State) {
-        val up = state == Tunnel.State.UP
+        val up = if (KeyStore.isDemo(this)) demoUp else state == Tunnel.State.UP
 
         val visual = when {
             busy -> PowerVisualState.CONNECTING
@@ -223,9 +270,9 @@ class MainActivity : AppCompatActivity() {
         binding.buttonToggle.contentDescription =
             getString(if (up) R.string.disconnect else R.string.connect)
 
-        val config = currentConfig()
+        val hasAnyKey = KeyStore.rawText(this) != null
         binding.buttonKey.setText(
-            if (config == null) R.string.paste_key else R.string.replace_key,
+            if (hasAnyKey) R.string.replace_key else R.string.paste_key,
         )
         if (!up) {
             binding.textReceived.text = getString(R.string.traffic_placeholder)
