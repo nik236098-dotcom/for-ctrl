@@ -13,6 +13,17 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        // Адрес сервера ключей: короткий ключ, который вставляет человек,
+        // приложение меняет здесь на настоящий конфиг тунеля. Задаётся при
+        // сборке (-PkeyServerUrl=http://ваш.сервер:8081), в CI — из секрета
+        // KEY_SERVER_URL. Пусто — вставка короткого ключа не сработает,
+        // остаётся только встроенный в сборку конфиг (assets/wg.conf).
+        buildConfigField(
+            "String",
+            "KEY_SERVER_URL",
+            "\"${(project.findProperty("keyServerUrl") as? String).orEmpty()}\"",
+        )
     }
 
     buildTypes {
@@ -36,6 +47,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 

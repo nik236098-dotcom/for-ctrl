@@ -34,6 +34,16 @@ CREATE TABLE IF NOT EXISTS invites (
     used_at    TEXT
 );
 
+-- Короткий ключ (8 букв/цифр), который человек вставляет в приложении.
+-- Сам конфиг тунеля в него не помещается — лежит здесь, приложение
+-- забирает его с сервера ключей один раз по коду, дальше работает офлайн.
+CREATE TABLE IF NOT EXISTS access_keys (
+    code        TEXT PRIMARY KEY,
+    client_name TEXT NOT NULL,
+    config      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS payments (
     invoice_id TEXT PRIMARY KEY,
     tg_id      INTEGER NOT NULL,
@@ -220,6 +230,29 @@ class Storage:
             "SELECT code FROM invites WHERE used_by IS NULL ORDER BY created_at"
         ).fetchall()
         return [row["code"] for row in rows]
+
+    # --- короткие ключи ---------------------------------------------------
+
+    def key_exists(self, code: str) -> bool:
+        row = self._db.execute(
+            "SELECT 1 FROM access_keys WHERE code = ?", (code,)
+        ).fetchone()
+        return row is not None
+
+    def store_key(self, code: str, client_name: str, config_text: str) -> None:
+        self._db.execute(
+            "INSERT INTO access_keys (code, client_name, config, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (code, client_name, config_text, _iso(utcnow())),
+        )
+        self._db.commit()
+
+    def key_config(self, code: str) -> str | None:
+        """Конфиг тунеля по короткому коду — то, что отдаём в /key/<code>."""
+        row = self._db.execute(
+            "SELECT config FROM access_keys WHERE code = ?", (code,)
+        ).fetchone()
+        return row["config"] if row else None
 
     # --- платежи --------------------------------------------------------
 

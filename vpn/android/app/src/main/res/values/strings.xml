@@ -1,30 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RU VPN</string>
-    <string name="subtitle">канал связи</string>
+    <string name="app_name">Ru VPN</string>
 
-    <string name="status_connected">Канал открыт</string>
+    <string name="status_connected">Впн включен</string>
     <string name="status_connecting">Наводим связь…</string>
-    <string name="status_disconnected">Канал закрыт</string>
+    <string name="status_disconnected">Впн выключен</string>
 
     <string name="connect">Соединить</string>
     <string name="disconnect">Разъединить</string>
 
-    <string name="server_none">Ключ пока не вставлен</string>
-    <string name="server_value">Сервер: %1$s</string>
+    <string name="traffic_received_label">Получено</string>
+    <string name="traffic_sent_label">Отправлено</string>
+    <string name="traffic_placeholder">0 КБ</string>
 
-    <string name="key_missing">Возьмите ключ у бота и вставьте его сюда</string>
-    <string name="key_own">Ключ на месте</string>
-    <string name="key_bundled">Ключ уже внутри приложения</string>
-
-    <string name="traffic_idle">Принято — · Отправлено —</string>
-    <string name="traffic_value">Принято %1$s · Отправлено %2$s</string>
-
-    <string name="check_ip">Откуда нас видно?</string>
-    <string name="ip_unknown">Пока не смотрели</string>
-    <string name="ip_checking">Смотрим…</string>
-    <string name="ip_result">Видно из: %1$s (%2$s)</string>
-    <string name="ip_error">Не вышло посмотреть: %1$s</string>
+    <string name="ip_line">Ваш ip: %1$s</string>
+    <string name="ip_placeholder">Ваш ip: …</string>
+    <string name="ip_unavailable">Ваш ip: недоступно</string>
 
     <string name="paste_key">Вставить ключ</string>
     <string name="replace_key">Заменить ключ</string>
@@ -36,7 +27,7 @@
 
     <string name="key_saved">Ключ сохранён</string>
     <string name="error_no_key">Сначала вставьте ключ — его выдаёт бот</string>
-    <string name="error_bad_key">Это не похоже на ключ. Скопируйте его из бота целиком.</string>
+    <string name="error_bad_key">Не получилось: %1$s. Скопируйте ключ из бота целиком и проверьте интернет.</string>
     <string name="error_permission_denied">Без разрешения на VPN связи не будет</string>
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>

@@ -66,6 +66,8 @@ class Config:
     wg_iface: str
     config_message_ttl_minutes: int
     apk_url: str
+    key_server_host: str
+    key_server_port: int
 
     @property
     def payments_enabled(self) -> bool:
@@ -103,4 +105,6 @@ def load() -> Config:
         wg_iface=os.getenv("WG_IFACE", "wg0").strip(),
         config_message_ttl_minutes=_int("CONFIG_MESSAGE_TTL_MINUTES", 0),
         apk_url=os.getenv("APK_URL", "").strip(),
+        key_server_host=os.getenv("KEY_SERVER_HOST", "0.0.0.0").strip(),
+        key_server_port=_int("KEY_SERVER_PORT", 8081),
     )

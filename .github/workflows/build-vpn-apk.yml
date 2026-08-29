@@ -46,9 +46,15 @@ jobs:
             echo "секрет WG_CONFIG не задан — собираем без встроенного конфига"
           fi
 
+      # Адрес сервера ключей: приложение меняет на него короткий ключ
+      # (8 символов) на настоящий конфиг тунеля при вставке. Без секрета
+      # KEY_SERVER_URL вставка короткого ключа не сработает — останется
+      # только конфиг, вшитый через WG_CONFIG выше.
       - name: Сборка debug-APK
         working-directory: vpn/android
-        run: gradle --no-daemon assembleDebug
+        env:
+          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
+        run: gradle --no-daemon assembleDebug -PkeyServerUrl="$KEY_SERVER_URL"
 
       - uses: actions/upload-artifact@v4
         with:

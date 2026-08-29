@@ -46,11 +46,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         VpnManager.init(this)
-        powerButton = PowerButtonAnimator(binding.imagePowerGlow, binding.imageRing)
+        powerButton = PowerButtonAnimator(binding.imagePowerOn)
 
         binding.buttonToggle.setOnClickListener { onToggleClicked() }
         binding.buttonKey.setOnClickListener { showKeyDialog() }
-        binding.buttonCheckIp.setOnClickListener { checkIp() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -71,12 +70,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         powerButton.onLifecycleResume()
         lifecycleScope.launch { VpnManager.refreshState() }
+        checkIp()
     }
 
     override fun onPause() {
         super.onPause()
-        // Вращение ободка — чистая косметика, крутить его, когда экран не
-        // виден, только сажать батарею.
         powerButton.onLifecyclePause()
     }
 
@@ -110,6 +108,8 @@ class MainActivity : AppCompatActivity() {
             runCatching { VpnManager.setState(up = true, config = config) }
                 .onFailure { toast(getString(R.string.error_connect, it.messageOrClass())) }
             setBusy(false)
+            // IP теперь российский (или как получится) — сразу видно, что изменилось.
+            checkIp()
         }
     }
 
@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
             runCatching { VpnManager.setState(up = false, config = null) }
                 .onFailure { toast(getString(R.string.error_disconnect, it.messageOrClass())) }
             setBusy(false)
+            checkIp()
         }
     }
 
@@ -143,16 +144,25 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * Ключ, который вставляют — короткий код (8 символов): настоящие
+     * настройки тунеля запрашиваются у сервера ключей один раз, здесь же
+     * и сохраняются — дальше подключение работает офлайн.
+     */
     private fun saveKey(text: String) {
-        runCatching {
-            KeyStore.parse(text)
-            KeyStore.save(this, text)
-        }
-            .onSuccess {
-                toast(getString(R.string.key_saved))
-                render(VpnManager.state.value)
+        lifecycleScope.launch {
+            runCatching {
+                val resolved = KeyStore.resolve(text)
+                KeyStore.parse(resolved) // проверка, что это и правда конфиг тунеля
+                resolved
             }
-            .onFailure { toast(getString(R.string.error_bad_key)) }
+                .onSuccess { resolved ->
+                    KeyStore.save(this@MainActivity, resolved)
+                    toast(getString(R.string.key_saved))
+                    render(VpnManager.state.value)
+                }
+                .onFailure { toast(getString(R.string.error_bad_key, it.messageOrClass())) }
+        }
     }
 
     private fun clipboardKey(): String? {
@@ -165,19 +175,26 @@ class MainActivity : AppCompatActivity() {
         return text?.takeIf { KeyStore.looksLikeKey(it) }?.trim()
     }
 
+    /** Ваш ip показывается всегда, без отдельной кнопки — обновляется само. */
     private fun checkIp() {
-        binding.textIp.text = getString(R.string.ip_checking)
         lifecycleScope.launch {
             runCatching { IpChecker.lookup() }
                 .onSuccess { result ->
-                    val mark = if (result.countryCode.equals("RU", ignoreCase = true)) " ✅" else " ⚠️"
-                    binding.textIp.text =
-                        getString(R.string.ip_result, result.ip, result.country) + mark
+                    val flag = flagEmoji(result.countryCode)
+                    binding.textIp.text = getString(R.string.ip_line, "${result.ip} $flag".trim())
                 }
                 .onFailure {
-                    binding.textIp.text = getString(R.string.ip_error, it.messageOrClass())
+                    binding.textIp.text = getString(R.string.ip_unavailable)
                 }
         }
+    }
+
+    private fun flagEmoji(countryCode: String): String {
+        if (countryCode.length != 2 || !countryCode.all { it.isLetter() }) return ""
+        val base = 0x1F1E6 - 'A'.code
+        return countryCode.uppercase(Locale.ROOT)
+            .map { String(Character.toChars(base + it.code)) }
+            .joinToString("")
     }
 
     // --- отрисовка ----------------------------------------------------------
@@ -201,37 +218,26 @@ class MainActivity : AppCompatActivity() {
             binding.textStatus.setText(
                 if (up) R.string.status_connected else R.string.status_disconnected,
             )
-            binding.textStatus.setTextColor(getColor(if (up) R.color.green else R.color.red))
+            binding.textStatus.setTextColor(getColor(if (up) R.color.cyan else R.color.ink_soft))
         }
         binding.buttonToggle.contentDescription =
             getString(if (up) R.string.disconnect else R.string.connect)
 
         val config = currentConfig()
-        binding.textServer.text = when (config) {
-            null -> getString(R.string.server_none)
-            else -> getString(R.string.server_value, KeyStore.endpointOf(config))
-        }
-        binding.textKeyState.setText(
-            when {
-                config == null -> R.string.key_missing
-                KeyStore.isOwn(this) -> R.string.key_own
-                else -> R.string.key_bundled
-            },
-        )
         binding.buttonKey.setText(
             if (config == null) R.string.paste_key else R.string.replace_key,
         )
-        if (!up) binding.textTraffic.text = getString(R.string.traffic_idle)
+        if (!up) {
+            binding.textReceived.text = getString(R.string.traffic_placeholder)
+            binding.textSent.text = getString(R.string.traffic_placeholder)
+        }
     }
 
     private suspend fun updateTraffic() {
         if (VpnManager.state.value != Tunnel.State.UP) return
         val stats = VpnManager.statistics() ?: return
-        binding.textTraffic.text = getString(
-            R.string.traffic_value,
-            formatBytes(stats.totalRx()),
-            formatBytes(stats.totalTx()),
-        )
+        binding.textReceived.text = formatBytes(stats.totalRx())
+        binding.textSent.text = formatBytes(stats.totalTx())
     }
 
     private fun setBusy(busy: Boolean) {

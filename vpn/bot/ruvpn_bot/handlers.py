@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import html
 import logging
+import secrets
+import string
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -230,22 +231,33 @@ async def cmd_key(message: Message, command: CommandObject, deps: Deps) -> None:
         return
 
     deps.db.add_device(name, user.tg_id, title, ip)
-    await send_key(message, deps, title, config_text)
+    await send_key(message, deps, name, title, config_text)
 
 
-def make_key(config_text: str) -> str:
-    """Упаковывает настройки туннеля в одну строку — это и есть «ключ».
+_KEY_ALPHABET = string.ascii_letters + string.digits
+_KEY_LENGTH = 8
 
-    Пользователю не нужно знать, что внутри: он копирует строку из чата и
-    вставляет её в приложении одной кнопкой.
+
+def make_key(deps: Deps, client_name: str, config_text: str) -> str:
+    """Короткий ключ — 8 букв и цифр вперемешку, вот и всё, что видит человек.
+
+    Само содержимое туннеля (приватный ключ, адрес сервера) в 8 символов не
+    упаковать — оно остаётся на сервере, а ключ лишь указывает на запись:
+    приложение вставляет его один раз, конфиг сервер ключей отдаёт сам.
     """
-    payload = base64.urlsafe_b64encode(config_text.encode()).decode()
-    return f"ruvpn://{payload}"
+    while True:
+        code = "".join(secrets.choice(_KEY_ALPHABET) for _ in range(_KEY_LENGTH))
+        if not deps.db.key_exists(code):
+            break
+    deps.db.store_key(code, client_name, config_text)
+    return f"ruvpn://{code}"
 
 
-async def send_key(message: Message, deps: Deps, title: str, config_text: str) -> None:
+async def send_key(
+    message: Message, deps: Deps, client_name: str, title: str, config_text: str
+) -> None:
     """Отдаёт ключ строкой (жмите — копируется) и QR для сторонних приложений."""
-    key = make_key(config_text)
+    key = make_key(deps, client_name, config_text)
     app_line = (
         f"\n\nПриложение: {deps.cfg.apk_url}" if deps.cfg.apk_url else ""
     )

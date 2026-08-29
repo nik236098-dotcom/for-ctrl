@@ -10,10 +10,6 @@
     <color name="card_stroke">#2E3B6E</color>
     <color name="ink">#EAF2FF</color>
     <color name="ink_soft">#8C9BC9</color>
-    <color name="hairline">#2E3B6E</color>
-
-    <color name="green">#4FE3FF</color>
-    <color name="red">#FF6E6E</color>
 
     <color name="ic_launcher_background">#05070F</color>
 </resources>

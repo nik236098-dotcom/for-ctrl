@@ -12,6 +12,7 @@ from aiogram import Bot, Dispatcher
 from . import config as config_module
 from .db import Storage
 from .handlers import Deps, notify, resume_devices, router, suspend_devices
+from .keyserver import start as start_keyserver
 from .payments import CryptoPay, CryptoPayError
 from .wg import Wireguard
 
@@ -132,6 +133,10 @@ async def main() -> None:
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
+    keyserver_runner = await start_keyserver(
+        deps.db, cfg.key_server_host, cfg.key_server_port
+    )
+
     tasks = [asyncio.create_task(enforce_terms(bot, deps))]
     if deps.crypto is not None:
         tasks.append(asyncio.create_task(payments_watch(bot, deps)))
@@ -151,6 +156,7 @@ async def main() -> None:
     finally:
         for task in tasks:
             task.cancel()
+        await keyserver_runner.cleanup()
         if deps.crypto is not None:
             await deps.crypto.close()
         deps.db.close()

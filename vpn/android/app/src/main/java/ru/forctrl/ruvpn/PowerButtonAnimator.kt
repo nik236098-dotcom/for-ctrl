@@ -4,27 +4,18 @@ import android.animation.Animator
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.os.Build
-import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 
 enum class PowerVisualState { OFF, CONNECTING, UP }
 
 /**
- * Управляет двумя слоями над корпусом кнопки: статичным свечением
- * (тускнеет/разгорается по состоянию, во время подключения — «дышит») и
- * вращающимся ободком-нимбом позади кнопки.
- *
- * Ободок не пересоздаётся при каждом переключении — он ставится на паузу и
- * снимается с неё (`pause()`/`resume()`), чтобы не дёргаться на исходный
- * угол при каждом отключении/включении.
+ * Кнопка — две картинки друг над другом: выключенная (всегда на месте) и
+ * включённая (светящаяся), которая проявляется поверх неё кроссфейдом.
+ * Отдельного кольца больше нет — оно уже запечено в обеих картинках.
  */
-class PowerButtonAnimator(
-    private val glow: ImageView,
-    private val ring: ImageView,
-) {
+class PowerButtonAnimator(private val glow: ImageView) {
+
     private var glowAnimator: Animator? = null
-    private var ringRotator: ObjectAnimator? = null
-    private var ringShouldSpin = false
 
     fun apply(state: PowerVisualState) {
         glowAnimator?.cancel()
@@ -35,45 +26,12 @@ class PowerButtonAnimator(
             PowerVisualState.UP -> fadeTo(glow, 1f, reduceMotion)
             PowerVisualState.CONNECTING -> breathing(glow, reduceMotion)
         }
-
-        val ringTarget = if (state == PowerVisualState.OFF) 0f else 0.9f
-        ring.animate().cancel()
-        if (reduceMotion) {
-            ring.alpha = ringTarget
-        } else {
-            ring.animate().alpha(ringTarget).setDuration(FADE_MS).start()
-        }
-
-        ringShouldSpin = state != PowerVisualState.OFF && !reduceMotion
-        if (ringShouldSpin) startOrResumeSpin() else pauseSpin()
     }
 
-    /** Вызывать из onPause/onResume активности — вращение не крутится, пока экран не виден. */
-    fun onLifecyclePause() {
-        ringRotator?.pause()
-    }
+    /** Ничего не крутится — оставлены для совместимости с вызовами из активности. */
+    fun onLifecyclePause() {}
 
-    fun onLifecycleResume() {
-        if (ringShouldSpin) startOrResumeSpin()
-    }
-
-    private fun startOrResumeSpin() {
-        val existing = ringRotator
-        if (existing != null) {
-            if (existing.isPaused) existing.resume() else if (!existing.isRunning) existing.start()
-            return
-        }
-        ringRotator = ObjectAnimator.ofFloat(ring, "rotation", ring.rotation, ring.rotation + 360f).apply {
-            duration = ROTATION_MS
-            interpolator = LinearInterpolator()
-            repeatCount = ValueAnimator.INFINITE
-            start()
-        }
-    }
-
-    private fun pauseSpin() {
-        ringRotator?.pause()
-    }
+    fun onLifecycleResume() {}
 
     private fun fadeTo(view: ImageView, target: Float, reduceMotion: Boolean): Animator? {
         if (reduceMotion) {
@@ -115,6 +73,5 @@ class PowerButtonAnimator(
     companion object {
         private const val FADE_MS = 300L
         private const val BREATH_MS = 900L
-        private const val ROTATION_MS = 5_000L
     }
 }
