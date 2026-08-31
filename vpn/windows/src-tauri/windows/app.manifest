@@ -9,6 +9,26 @@
     чем городить отдельный привилегированный сервис-помощник.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="ru.forctrl.ruvpn" version="1.0.0.0" processorArchitecture="*" />
+  <!--
+      Без этого блока Windows грузит старую (несовместимую) comctl32.dll,
+      которая не экспортирует TaskDialogIndirect — реальная ошибка, пойманная
+      на установке: "Точка входа в процедуру TaskDialogIndirect не найдена".
+      Свой манифест целиком заменяет манифест по умолчанию, который
+      тулчейн Tauri обычно вписывает сам — поэтому этот стандартный блок
+      нужно прописать здесь руками, а не только requireAdministrator.
+  -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
