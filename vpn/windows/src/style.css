@@ -287,6 +287,24 @@ body {
   margin-top: 16px;
 }
 
+.country-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* Флаги — настоящие SVG, не эмодзи: пара «национальных букв» Юникода
+   рисуется как флаг только на свежих версиях Windows со свежим шрифтом,
+   иначе система молча показывает запасной вариант — буквы кода страны
+   (сам баг, который поймал пользователь). SVG не зависит от шрифта. */
+.flag-icon {
+  width: 24px;
+  height: 16px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 .country-button.selected {
   background: var(--cyan);
   color: var(--space-deep);
