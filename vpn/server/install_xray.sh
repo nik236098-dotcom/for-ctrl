@@ -16,10 +16,15 @@
 #   HAPP_PORT     - TCP-порт (по умолчанию 443 — Reality маскируется под
 #                   обычный HTTPS, поэтому стандартный порт важен)
 #   REALITY_DEST  - настоящий сайт, под который маскируется хендшейк
-#                   (по умолчанию www.microsoft.com:443) — Reality вместо
+#                   (по умолчанию www.cloudflare.com:443) — Reality вместо
 #                   себя показывает цензору подлинный TLS-сертификат этого
 #                   сайта, поэтому годится только реальный, живой TLS 1.3
 #                   сайт с поддержкой HTTP/2, не подставной адрес.
+#                   НЕ www.microsoft.com: проверено вживую — его сертификат
+#                   сейчас весит 8273 байта, а в самой библиотеке Reality
+#                   зашит жёсткий лимит буфера 8192 байт — handshake ломается
+#                   у всех клиентов всегда, это не проблема настройки
+#                   (см. github.com/XTLS/Xray-core issues #6356, #6402).
 #
 set -euo pipefail
 
@@ -28,7 +33,7 @@ PARAMS="${XRAY_DIR}/ruvpn.params"
 CLIENTS_DB="${XRAY_DIR}/ruvpn-clients.json"
 
 HAPP_PORT="${HAPP_PORT:-443}"
-REALITY_DEST="${REALITY_DEST:-www.microsoft.com:443}"
+REALITY_DEST="${REALITY_DEST:-www.cloudflare.com:443}"
 REALITY_SERVER_NAME="${REALITY_DEST%:*}"
 
 die() { echo "ОШИБКА: $*" >&2; exit 1; }
