@@ -32,6 +32,7 @@
     <string name="error_permission_denied">Без разрешения на VPN связи не будет</string>
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
+    <string name="error_key_dead">Впн не работает — этот ключ больше не действует. Вставьте новый (его выдаёт бот).</string>
 
     <string name="power_button_description">Кнопка соединения</string>
 

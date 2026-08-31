@@ -34,6 +34,17 @@ class MainActivity : AppCompatActivity() {
     /** Тестовый ключ (см. [KeyStore.DEMO_KEY]): включён ли визуально — без реального тунеля. */
     private var demoUp = false
 
+    /**
+     * Служба тунеля и реальный пир на сервере — два независимых состояния:
+     * /drop, истечение подписки и т.п. снимают пира на сервере, но
+     * локальный WireGuard-тунель остаётся Tunnel.State.UP как ни в чём не
+     * бывало. Раньше приложение в этом случае продолжало честно писать
+     * "Впн включен", хотя реального интернета через тунель не было вообще.
+     * Считаем несколько подряд неудачных проверок айпи (не одну — чтобы не
+     * среагировать на случайный сетевой сбой) признаком мёртвого ключа.
+     */
+    private var ipFailureStreak = 0
+
     /** Разрешение системы на VPN — спрашивается один раз на установку. */
     private val vpnPermission = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -67,6 +78,14 @@ class MainActivity : AppCompatActivity() {
                 while (true) {
                     updateTraffic()
                     delay(2_000)
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(15_000)
+                    watchKeyStillWorks()
                 }
             }
         }
@@ -300,16 +319,49 @@ class MainActivity : AppCompatActivity() {
 
     /** Ваш ip показывается всегда, без отдельной кнопки — обновляется само. */
     private fun checkIp() {
-        lifecycleScope.launch {
-            runCatching { IpChecker.lookup() }
-                .onSuccess { result ->
-                    val flag = flagEmoji(result.countryCode)
-                    binding.textIp.text = getString(R.string.ip_line, "${result.ip} $flag".trim())
-                }
-                .onFailure {
-                    binding.textIp.text = getString(R.string.ip_unavailable)
-                }
+        lifecycleScope.launch { refreshIp() }
+    }
+
+    /** Возвращает true, если айпи реально удалось узнать (тунель что-то пропускает). */
+    private suspend fun refreshIp(): Boolean =
+        runCatching { IpChecker.lookup() }
+            .onSuccess { result ->
+                val flag = flagEmoji(result.countryCode)
+                binding.textIp.text = getString(R.string.ip_line, "${result.ip} $flag".trim())
+            }
+            .onFailure {
+                binding.textIp.text = getString(R.string.ip_unavailable)
+            }
+            .isSuccess
+
+    /**
+     * Пока тунель "включен", раз в 15 секунд тихо проверяем айпи. Два
+     * подряд неудачных обращения — тунель локально поднят, а ключ на
+     * сервере больше не работает (см. комментарий у [ipFailureStreak]).
+     * В этом случае сами отключаемся и честно говорим об этом, вместо
+     * того чтобы бесконечно висеть "включенным" без реального интернета.
+     */
+    private suspend fun watchKeyStillWorks() {
+        if (busy || KeyStore.isDemo(this)) return
+        if (VpnManager.state.value != Tunnel.State.UP) {
+            ipFailureStreak = 0
+            return
         }
+        if (refreshIp()) {
+            ipFailureStreak = 0
+            return
+        }
+        ipFailureStreak++
+        if (ipFailureStreak >= 2) {
+            ipFailureStreak = 0
+            handleDeadKey()
+        }
+    }
+
+    private suspend fun handleDeadKey() {
+        toast(getString(R.string.error_key_dead))
+        runCatching { VpnManager.setState(up = false, config = null) }
+        render(VpnManager.state.value)
     }
 
     private fun flagEmoji(countryCode: String): String {
