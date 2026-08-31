@@ -280,6 +280,68 @@ fn wireguard_installed() -> bool {
     wireguard_exe().exists()
 }
 
+const WIREGUARD_INDEX_URL: &str = "https://download.wireguard.com/windows-client/";
+
+/// Имена вида `wireguard-amd64-0.5.3.msi` — любые из встречающихся в HTML
+/// как отдельные строки в кавычках (атрибут ссылки), без предположений о
+/// точной разметке страницы.
+fn extract_msi_filenames(html: &str) -> Vec<&str> {
+    html.split(['"', '\''])
+        .filter(|token| token.starts_with("wireguard-amd64-") && token.ends_with(".msi"))
+        .collect()
+}
+
+fn parse_msi_version(name: &str) -> Option<(u32, u32, u32)> {
+    let stem = name.strip_prefix("wireguard-amd64-")?.strip_suffix(".msi")?;
+    let mut parts = stem.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// Прямая ссылка на MSI-пакет последней версии (не на bootstrapper .exe) —
+/// нужна, чтобы поставить его по-настоящему без единого окна через
+/// `msiexec /quiet`, в отличие от .exe-обёртки (см. [install_wireguard]).
+/// ЛУЧШАЯ ПОПЫТКА, не проверено вживую: если формат страницы окажется
+/// другим и разбор не найдёт ни одного файла — [install_wireguard] сам
+/// откатится на прежний (видимый) способ через .exe.
+async fn find_latest_msi_url() -> Option<String> {
+    let html = reqwest::get(WIREGUARD_INDEX_URL).await.ok()?.text().await.ok()?;
+    extract_msi_filenames(&html)
+        .into_iter()
+        .filter_map(|name| parse_msi_version(name).map(|version| (version, name)))
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, name)| format!("{WIREGUARD_INDEX_URL}{name}"))
+}
+
+/// Тихая установка через прямой MSI-пакет — по-настоящему без единого
+/// окна (`msiexec /quiet` — не предположение, а стандартное, всегда
+/// безголовое поведение Windows Installer).
+async fn install_via_msi(url: &str) -> Result<(), String> {
+    let bytes = reqwest::get(url)
+        .await
+        .map_err(|e| e.to_string())?
+        .bytes()
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = std::env::temp_dir().join("ruvpn-wireguard-latest.msi");
+    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let status = new_command("msiexec")
+        .arg("/i")
+        .arg(&path)
+        .arg("/quiet")
+        .arg("/qn")
+        .arg("/norestart")
+        .status()
+        .map_err(|e| e.to_string());
+    fs::remove_file(&path).ok();
+    if !status?.success() {
+        return Err("msiexec не смог поставить пакет".to_string());
+    }
+    Ok(())
+}
+
 async fn download_installer() -> Result<PathBuf, String> {
     let url = "https://download.wireguard.com/windows-client/wireguard-installer.exe";
     let bytes = reqwest::get(url)
@@ -295,17 +357,27 @@ async fn download_installer() -> Result<PathBuf, String> {
 
 /// Установка официального клиента: приложение уже само запущено от
 /// администратора (windows/app.manifest), поэтому дочерний установщик
-/// наследует те же права и не спрашивает UAC повторно. На практике (по
-/// отзыву с реального устройства) окно официального установщика не
-/// закрывается само — там нужно нажать «Установить» руками; полностью
-/// безголового режима у него нет, задокументированного флага для этого
-/// тоже. Приложение просто ждёт, пока это окно закроется (см. фронтенд:
-/// перед этим шагом показывается предупреждение, что окно появится).
+/// наследует те же права и не спрашивает UAC повторно.
+///
+/// Сначала пробуем по-настоящему тихий путь — сам MSI-пакет через
+/// `msiexec /quiet` (см. [install_via_msi]), без единого окна. Если он по
+/// любой причине не сработал (страница со ссылками на MSI изменила
+/// формат, сеть подвела и т.п.) — откатываемся на официальный .exe-
+/// установщик; на практике (по отзыву с реального устройства) его окно
+/// само не закрывается, там нужно нажать «Установить» руками — фронтенд
+/// предупреждает об этом тостом на случай, если дойдёт до этого шага.
 #[tauri::command]
 async fn install_wireguard() -> Result<(), String> {
     if wireguard_installed() {
         return Ok(());
     }
+
+    if let Some(msi_url) = find_latest_msi_url().await {
+        if install_via_msi(&msi_url).await.is_ok() && wireguard_installed() {
+            return Ok(());
+        }
+    }
+
     let installer = download_installer().await?;
     let status = new_command(&installer)
         .status()
