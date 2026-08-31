@@ -50,6 +50,21 @@ info "Ставим Xray-core (официальный установщик про
 bash -c "$(curl -L https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh)" @ install
 command -v xray >/dev/null || die "xray не установился"
 
+# Официальный юнит запускает xray от пользователя nobody — а config.json
+# ниже мы пишем в режиме 600 (только root), потому что там лежит приватный
+# ключ Reality. Nobody физически не может его прочитать — служба падает в
+# цикле с "permission denied" (проверено вживую). Проще и надёжнее не
+# подбирать права на файлы под nobody, а просто запускать xray от root —
+# override, а не правка самого юнита, чтобы это работало вне зависимости от
+# того, что именно написал официальный установщик.
+info "Правим systemd-юнит: xray от root (иначе не читает свой же config.json)"
+mkdir -p /etc/systemd/system/xray.service.d
+cat > /etc/systemd/system/xray.service.d/override.conf <<'EOF'
+[Service]
+User=root
+Group=root
+EOF
+
 info "Генерируем ключи Reality"
 # Формат вывода `xray x25519` менялся между версиями — старые пишут
 # "Private key:"/"Public key:", новые (25.3.6+) "PrivateKey:"/"Password:", а в
