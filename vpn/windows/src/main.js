@@ -147,6 +147,12 @@ async function connectReal() {
     openKeyDialog();
     return;
   }
+  if (!(await invoke("wireguard_installed"))) {
+    // Официальный установщик на практике сам не закрывается — там нужно
+    // нажать «Установить» вручную, поэтому честно предупреждаем заранее,
+    // а не притворяемся, что это невидимый шаг.
+    toast("Сейчас откроется установка WireGuard for Windows — нажмите «Установить», это один раз");
+  }
   setBusy(true);
   try {
     await invoke("connect", { configText: key });

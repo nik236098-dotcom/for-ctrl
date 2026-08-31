@@ -293,13 +293,14 @@ async fn download_installer() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Тихая (насколько это вообще возможно) установка официального клиента:
-/// приложение уже само запущено от администратора (windows/app.manifest),
-/// поэтому дочерний установщик наследует те же права и не спрашивает UAC
-/// повторно. Собственное окно официального установщика мигнёт один раз —
-/// у него нет мастера «Далее/Далее/Готово», он сам закрывается по
-/// завершении. Задокументированного флага полностью безголовой установки у
-/// него нет, так что это лучшее, что можно сделать без переупаковки MSI.
+/// Установка официального клиента: приложение уже само запущено от
+/// администратора (windows/app.manifest), поэтому дочерний установщик
+/// наследует те же права и не спрашивает UAC повторно. На практике (по
+/// отзыву с реального устройства) окно официального установщика не
+/// закрывается само — там нужно нажать «Установить» руками; полностью
+/// безголового режима у него нет, задокументированного флага для этого
+/// тоже. Приложение просто ждёт, пока это окно закроется (см. фронтенд:
+/// перед этим шагом показывается предупреждение, что окно появится).
 #[tauri::command]
 async fn install_wireguard() -> Result<(), String> {
     if wireguard_installed() {
@@ -325,26 +326,41 @@ async fn install_wireguard() -> Result<(), String> {
 
 #[tauri::command]
 async fn connect(config_text: String) -> Result<(), String> {
-    if !wireguard_installed() {
+    let freshly_installed = !wireguard_installed();
+    if freshly_installed {
         install_wireguard().await?;
+        // Сразу после установки службе/драйверу WireGuard иногда нужно
+        // немного времени, чтобы "осесть" — первая попытка поднять тунель
+        // в ту же секунду не всегда проходит (не проверено на реальной
+        // Windows — это лучшая попытка объяснить жалобу "после установки
+        // ничего не работает", а не подтверждённая причина).
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
+
     let conf_dir = std::env::temp_dir().join("ruvpn-windows");
     fs::create_dir_all(&conf_dir).map_err(|e| e.to_string())?;
     let conf_path = conf_dir.join(format!("{TUNNEL_NAME}.conf"));
     fs::write(&conf_path, &config_text).map_err(|e| e.to_string())?;
 
-    let output = new_command(wireguard_exe())
-        .arg("/installtunnelservice")
-        .arg(&conf_path)
-        .output()
-        .map_err(|e| e.to_string());
+    let mut result = install_tunnel_service(&conf_path).await;
+    if result.is_err() && freshly_installed {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        result = install_tunnel_service(&conf_path).await;
+    }
 
     // /installtunnelservice считывает конфиг и запоминает его сам внутри
     // сервиса — файл на диске больше не нужен, а держать там приватный
     // ключ незачем.
     fs::remove_file(&conf_path).ok();
+    result
+}
 
-    let output = output?;
+async fn install_tunnel_service(conf_path: &std::path::Path) -> Result<(), String> {
+    let output = new_command(wireguard_exe())
+        .arg("/installtunnelservice")
+        .arg(conf_path)
+        .output()
+        .map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(command_error(&output.stderr, output.status.code()));
     }
