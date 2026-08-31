@@ -21,3 +21,8 @@ vpn/android/app/src/main/assets/wg.conf
 vpn/bot/venv/
 vpn/bot/.env
 *.db
+
+# Windows-клиент VPN (Tauri/Rust)
+vpn/windows/src-tauri/target/
+vpn/windows/src-tauri/gen/
+vpn/windows/src-tauri/Cargo.lock
