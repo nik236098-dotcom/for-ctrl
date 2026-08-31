@@ -8,10 +8,8 @@
 
 use serde::Serialize;
 use std::fs;
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::Manager;
 
@@ -533,83 +531,54 @@ fn service_running(service_name: &str) -> bool {
     }
 }
 
-/// Если однажды не получилось прочитать статистику через именованный канал —
-/// больше не пытаемся в этой сессии (см. комментарий у [read_transfer_stats_blocking]
-/// про то, почему это не гарантировано).
-static STATS_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
-
 #[tauri::command]
 async fn tunnel_status() -> TunnelStatus {
     let up = service_running(&format!("WireGuardTunnel${TUNNEL_NAME}"));
-    let (rx, tx) = if up { read_transfer_stats().await } else { (0, 0) };
+    let (rx, tx) = if up {
+        read_interface_bytes(TUNNEL_NAME).unwrap_or((0, 0))
+    } else {
+        (0, 0)
+    };
     TunnelStatus { up, rx, tx }
 }
 
-async fn read_transfer_stats() -> (u64, u64) {
-    if STATS_UNAVAILABLE.load(Ordering::Relaxed) {
-        return (0, 0);
-    }
-    let result = tokio::time::timeout(
-        Duration::from_millis(1200),
-        tokio::task::spawn_blocking(read_transfer_stats_blocking),
-    )
-    .await;
-    match result {
-        Ok(Ok(Some(values))) => values,
-        _ => {
-            // Либо канала нет по этому пути, либо протокол не совпал с
-            // ожидаемым — не настаиваем дальше в этом запуске приложения
-            // (иначе на зависшем чтении будут копиться потоки при каждом
-            // опросе раз в 2 секунды).
-            STATS_UNAVAILABLE.store(true, Ordering::Relaxed);
-            (0, 0)
+/// Счётчики трафика — тем же способом, что и любой другой сетевой адаптер
+/// в диспетчере задач Windows: тунель WireGuard виден системе как обычный
+/// сетевой интерфейс (см. вывод `ipconfig` — "Неизвестный адаптер ruvpn",
+/// описание "WireGuard Tunnel"), у него есть стандартные счётчики байт
+/// через IP Helper API. Это не самопальный протокол — задокументированный
+/// Win32 API, тот же MIB_IF_ROW2, что использует сама Windows.
+#[cfg(windows)]
+fn read_interface_bytes(alias: &str) -> Option<(u64, u64)> {
+    use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
+
+    unsafe {
+        let mut table_ptr: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+        if GetIfTable2(&mut table_ptr).is_err() || table_ptr.is_null() {
+            return None;
         }
+        let table = &*table_ptr;
+        let count = table.NumEntries as usize;
+        let rows = std::slice::from_raw_parts(table.Table.as_ptr(), count);
+
+        let result = rows.iter().find_map(|row| {
+            let row_alias = String::from_utf16_lossy(&row.Alias);
+            let row_alias = row_alias.trim_end_matches('\u{0}');
+            if row_alias.eq_ignore_ascii_case(alias) {
+                Some((row.InOctets, row.OutOctets))
+            } else {
+                None
+            }
+        });
+
+        FreeMibTable(table_ptr as *const core::ffi::c_void);
+        result
     }
 }
 
-/// ЛУЧШАЯ ПОПЫТКА, не проверено вживую на реальной Windows: WireGuard for
-/// Windows должен отвечать на тот же UAPI-протокол (`get=1\n\n` →
-/// `rx_bytes=…`/`tx_bytes=…` … `errno=0\n\n`), что и `wg show` на Linux, но
-/// через именованный канал `\\.\pipe\WireGuard\<имя>` вместо unix-сокета.
-/// Если имя канала или протокол не совпадут — просто не покажем
-/// цифры трафика (см. [STATS_UNAVAILABLE]), подключение это не сломает.
-fn read_transfer_stats_blocking() -> Option<(u64, u64)> {
-    let pipe_path = format!(r"\\.\pipe\WireGuard\{TUNNEL_NAME}");
-    let mut pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&pipe_path)
-        .ok()?;
-    pipe.write_all(b"get=1\n\n").ok()?;
-
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = pipe.read(&mut chunk).ok()?;
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > 4 && buf.windows(2).any(|w| w == b"\n\n") {
-            break;
-        }
-        if buf.len() > 1_000_000 {
-            break;
-        }
-    }
-
-    let text = String::from_utf8_lossy(&buf);
-    let mut rx_total = 0u64;
-    let mut tx_total = 0u64;
-    for line in text.lines() {
-        if let Some(value) = line.strip_prefix("rx_bytes=") {
-            rx_total += value.trim().parse().unwrap_or(0);
-        }
-        if let Some(value) = line.strip_prefix("tx_bytes=") {
-            tx_total += value.trim().parse().unwrap_or(0);
-        }
-    }
-    Some((rx_total, tx_total))
+#[cfg(not(windows))]
+fn read_interface_bytes(_alias: &str) -> Option<(u64, u64)> {
+    None
 }
 
 #[tauri::command]
