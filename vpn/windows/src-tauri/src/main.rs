@@ -409,9 +409,8 @@ async fn connect(config_text: String) -> Result<(), String> {
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    let conf_dir = std::env::temp_dir().join("ruvpn-windows");
-    fs::create_dir_all(&conf_dir).map_err(|e| e.to_string())?;
-    let conf_path = conf_dir.join(format!("{TUNNEL_NAME}.conf"));
+    let conf_path = tunnel_conf_path();
+    fs::create_dir_all(conf_path.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&conf_path, &config_text).map_err(|e| e.to_string())?;
 
     let mut result = install_tunnel_service(&conf_path).await;
@@ -420,11 +419,22 @@ async fn connect(config_text: String) -> Result<(), String> {
         result = install_tunnel_service(&conf_path).await;
     }
 
-    // /installtunnelservice считывает конфиг и запоминает его сам внутри
-    // сервиса — файл на диске больше не нужен, а держать там приватный
-    // ключ незачем.
-    fs::remove_file(&conf_path).ok();
+    // НЕ удаляем файл здесь: /installtunnelservice возвращает успех уже
+    // после регистрации службы в SCM, а сама служба открывает файл конфига
+    // чуть позже, асинхронно — реальная причина бага "wireguard.exe
+    // отчитался об успехе, а тунель не поднялся" (см. журнал WireGuard:
+    // "Unable to load configuration from path: ...The system cannot find
+    // the file specified" — служба стартовала уже после того, как этот же
+    // код успевал удалить файл). Файл остаётся лежать (перезаписывается на
+    // каждый connect) и удаляется только в disconnect(), когда служба уже
+    // снята и файл ей больше не понадобится.
     result
+}
+
+fn tunnel_conf_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("ruvpn-windows")
+        .join(format!("{TUNNEL_NAME}.conf"))
 }
 
 async fn install_tunnel_service(conf_path: &std::path::Path) -> Result<(), String> {
@@ -449,6 +459,8 @@ async fn disconnect() -> Result<(), String> {
     if !output.status.success() {
         return Err(command_error(&output.stderr, output.status.code()));
     }
+    // Служба снята — файл конфига (см. connect()) ей больше не нужен.
+    fs::remove_file(tunnel_conf_path()).ok();
     Ok(())
 }
 
