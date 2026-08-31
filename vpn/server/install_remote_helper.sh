@@ -54,8 +54,14 @@ chown -R root:root "$DEST/server"
 chmod 755 "$DEST/server" "$DEST"/server/*.sh
 
 info "Заводим пользователя ${REMOTE_USER}"
+# Оболочка — обычный bash, а не nologin: пароля у пользователя нет (вход
+# только по SSH-ключу, который вы сюда вставили), но SSH обязан запустить
+# ЕГО оболочку, чтобы выполнить присланную ботом команду — nologin отказал
+# бы даже в этом. Что реально можно сделать — и так ограничено sudoers ниже.
+SHELL_BIN="$(command -v bash || command -v sh)"
 id -u "$REMOTE_USER" >/dev/null 2>&1 || useradd --system --create-home \
-    --shell /usr/sbin/nologin "$REMOTE_USER"
+    --shell "$SHELL_BIN" "$REMOTE_USER"
+usermod --shell "$SHELL_BIN" "$REMOTE_USER"
 
 HOME_DIR="$(getent passwd "$REMOTE_USER" | cut -d: -f6)"
 mkdir -p "$HOME_DIR/.ssh"

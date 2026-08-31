@@ -79,6 +79,11 @@ class Wireguard:
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=accept-new",
+            # Домашняя папка ruvpnbot (/opt/ruvpn/bot) специально принадлежит
+            # root — самому ruvpnbot туда нечего писать (см. install_bot.sh).
+            # Без этого ssh не может сохранить known_hosts и падает с
+            # "Permission denied" вместо того, чтобы просто подключиться.
+            "-o", "UserKnownHostsFile=/dev/null",
             f"{self._ssh.user}@{self._ssh.host}",
             remote_command,
         ]
