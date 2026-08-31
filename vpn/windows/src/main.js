@@ -30,14 +30,22 @@ let busy = false;
 let demoUp = false;
 let toastTimer = null;
 
-function toast(text) {
+function toast(text, persistent = false) {
+  // Ошибки держим намного дольше (и по клику можно закрыть раньше) —
+  // 4 секунды слишком мало, чтобы успеть прочитать текст ошибки, не то что
+  // сфотографировать её для отчёта.
   el.toast.textContent = text;
   el.toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     el.toast.hidden = true;
-  }, 4000);
+  }, persistent ? 30000 : 4000);
 }
+
+el.toast.addEventListener("click", () => {
+  el.toast.hidden = true;
+  clearTimeout(toastTimer);
+});
 
 function messageOf(err) {
   if (typeof err === "string") return err;
@@ -147,21 +155,35 @@ async function connectReal() {
     openKeyDialog();
     return;
   }
-  if (!(await invoke("wireguard_installed"))) {
+  const needsInstall = !(await invoke("wireguard_installed"));
+  if (needsInstall) {
     // Обычно это происходит совсем незаметно (тихий msiexec), но на
     // случай отката на видимый установщик — предупреждаем заранее, а не
     // притворяемся, что окно точно не появится.
     toast("Настраиваем WireGuard — если появится окно установки, нажмите «Установить», это один раз");
   }
   setBusy(true);
+  if (needsInstall) {
+    // Отдельная подпись поверх общего "Наводим связь…" — чтобы было видно,
+    // на каком именно шаге зависло, если что-то пойдёт не так.
+    el.status.textContent = "Ставим WireGuard…";
+  }
+  let connectError = null;
   try {
     await invoke("connect", { configText: key });
   } catch (err) {
-    toast(`Не удалось соединиться: ${messageOf(err)}`);
+    connectError = messageOf(err);
+    toast(`Не удалось соединиться: ${connectError}`, true);
   }
   setBusy(false);
   const up = await refreshStatus();
   await render(up);
+  if (!connectError && !up) {
+    // wireguard.exe отчитался об успехе, а служба тунеля на самом деле не
+    // поднялась — раньше это происходило молча (просто "ничего не
+    // произошло"), теперь хотя бы видно, что это именно этот случай.
+    toast("wireguard.exe отчитался об успехе, но тунель не поднялся — сообщите об этом с скриншотом", true);
+  }
   checkIp();
 }
 
@@ -170,7 +192,7 @@ async function disconnectReal() {
   try {
     await invoke("disconnect");
   } catch (err) {
-    toast(`Не удалось разъединиться: ${messageOf(err)}`);
+    toast(`Не удалось разъединиться: ${messageOf(err)}`, true);
   }
   setBusy(false);
   const up = await refreshStatus();
@@ -224,7 +246,7 @@ async function saveKey() {
     const up = await refreshStatus();
     await render(up);
   } catch (err) {
-    toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ из бота целиком и проверьте интернет.`);
+    toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ из бота целиком и проверьте интернет.`, true);
   }
 }
 
@@ -265,7 +287,7 @@ async function chooseCountry(country) {
     closeCountryDialog();
     if (wasUp) await reconnectWithSavedKey();
   } catch (err) {
-    toast(`Не получилось сменить сервер: ${messageOf(err)}`);
+    toast(`Не получилось сменить сервер: ${messageOf(err)}`, true);
   }
 }
 
@@ -281,7 +303,7 @@ async function reconnectWithSavedKey() {
     try {
       await invoke("connect", { configText: key });
     } catch (err) {
-      toast(`Не удалось соединиться: ${messageOf(err)}`);
+      toast(`Не удалось соединиться: ${messageOf(err)}`, true);
     }
   }
   setBusy(false);
