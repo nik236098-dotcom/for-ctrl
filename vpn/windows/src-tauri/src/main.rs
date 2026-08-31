@@ -406,23 +406,30 @@ async fn install_wireguard() -> Result<(), String> {
 /// останется открытым, как сейчас.
 #[cfg(windows)]
 async fn close_wireguard_manager_window() {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+    // HWND (сырой указатель внутри) не Send — держать его через .await
+    // нельзя (именно на этом упала первая версия: "future returned by
+    // `connect` is not Send"). Весь поиск и ожидание — в отдельном потоке
+    // синхронно (std::thread::sleep, не tokio::time::sleep), наружу
+    // уходит только пустой результат.
+    let _ = tokio::task::spawn_blocking(|| {
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
 
-    let title: Vec<u16> = "WireGuard\0".encode_utf16().collect();
-    for _ in 0..10 {
-        let found = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) };
-        if let Ok(hwnd) = found {
-            if !hwnd.is_invalid() {
-                unsafe {
-                    let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+        let title: Vec<u16> = "WireGuard\0".encode_utf16().collect();
+        for _ in 0..10 {
+            if let Ok(hwnd) = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) } {
+                if !hwnd.is_invalid() {
+                    unsafe {
+                        let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                    }
+                    return;
                 }
-                return;
             }
+            std::thread::sleep(Duration::from_millis(500));
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+    })
+    .await;
 }
 
 #[tauri::command]

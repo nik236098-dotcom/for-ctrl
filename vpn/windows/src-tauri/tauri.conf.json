@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "GENA",
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
     "windows": {
