@@ -396,11 +396,42 @@ async fn install_wireguard() -> Result<(), String> {
     }
 }
 
+/// Официальный WireGuardManager сам открывает своё окно менеджера для
+/// вошедшего пользователя, когда служба менеджера впервые стартует после
+/// установки (см. его собственный журнал: "Starting UI process for
+/// user…") — это его поведение, не наш вызов, поэтому подавить это можно
+/// только закрыв уже появившееся окно самим. ЛУЧШАЯ ПОПЫТКА, не проверено
+/// вживую: несколько попыток с паузой, пока окно не появится (или не
+/// истечёт время) — если не найдём, просто ничего не делаем, окно
+/// останется открытым, как сейчас.
+#[cfg(windows)]
+async fn close_wireguard_manager_window() {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+
+    let title: Vec<u16> = "WireGuard\0".encode_utf16().collect();
+    for _ in 0..10 {
+        let found = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) };
+        if let Ok(hwnd) = found {
+            if !hwnd.is_invalid() {
+                unsafe {
+                    let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+                }
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 #[tauri::command]
 async fn connect(config_text: String) -> Result<(), String> {
     let freshly_installed = !wireguard_installed();
     if freshly_installed {
         install_wireguard().await?;
+        #[cfg(windows)]
+        close_wireguard_manager_window().await;
         // Сразу после установки службе/драйверу WireGuard иногда нужно
         // немного времени, чтобы "осесть" — первая попытка поднять тунель
         // в ту же секунду не всегда проходит (не проверено на реальной

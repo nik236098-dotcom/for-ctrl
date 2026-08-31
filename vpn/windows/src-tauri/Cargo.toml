@@ -19,6 +19,10 @@ base64 = "0.22"
 # Чтение буфера обмена для кнопки «Вставить из буфера» и автоподстановки —
 # то же самое, что ClipboardManager на Android.
 arboard = "3"
+# Официальный WireGuard сам открывает своё окно менеджера один раз после
+# установки (это его собственное поведение, не наш вызов) — пробуем
+# закрыть это окно за него, см. close_wireguard_manager_window() в main.rs.
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 # Приложение управляет системным сервисом туннеля (wireguard.exe
 # /installtunnelservice) — это требует прав администратора, поэтому всё
