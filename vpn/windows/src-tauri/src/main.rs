@@ -434,6 +434,14 @@ async fn close_wireguard_manager_window() {
 
 #[tauri::command]
 async fn connect(config_text: String) -> Result<(), String> {
+    // Если тунель уже поднят (например, наше приложение на секунду не
+    // успело обновить свой статус и второй клик пришёл раньше) —
+    // wireguard.exe откажет с "Tunnel already installed and running".
+    // Это не настоящая ошибка, тунель и так уже работает.
+    if service_running(&format!("WireGuardTunnel${TUNNEL_NAME}")) {
+        return Ok(());
+    }
+
     let freshly_installed = !wireguard_installed();
     if freshly_installed {
         install_wireguard().await?;
