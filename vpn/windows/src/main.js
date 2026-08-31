@@ -150,10 +150,57 @@ async function checkIp() {
     const result = await invoke("check_ip");
     el.ip.textContent = `Ваш ip: ${result.ip}`;
     el.ipFlag.innerHTML = flagSvg(result.country_code);
+    return true;
   } catch {
     el.ip.textContent = "Ваш ip: недоступно";
     el.ipFlag.innerHTML = "";
+    return false;
   }
+}
+
+// --- честный статус, если ключ сняли на сервере (истёк срок, /drop и т.п.) --
+//
+// Служба тунеля в Windows остаётся RUNNING даже после того, как пира сняли
+// с сервера — это два независимых состояния: локальная служба ничего не
+// знает про сервер. Раньше приложение в этом случае продолжало писать "Впн
+// включен", хотя реального интернета через тунель уже не было ни капли
+// (AllowedIPs = 0.0.0.0/0 — весь трафик уходит в мёртвый тунель, включая и
+// нашу же проверку айпи). Два подряд неудачных обращения (не одно — чтобы
+// не сработать на случайный сетевой сбой) считаем настоящей причиной:
+// тунель поднят локально, а ключ на сервере больше не работает.
+let ipFailureStreak = 0;
+let watchingKey = false;
+
+async function watchKeyStillWorks() {
+  if (busy || watchingKey || (await invoke("is_demo"))) return;
+  const status = await invoke("tunnel_status");
+  if (!status.up) {
+    ipFailureStreak = 0;
+    return;
+  }
+  watchingKey = true;
+  const ok = await checkIp();
+  watchingKey = false;
+  if (ok) {
+    ipFailureStreak = 0;
+    return;
+  }
+  ipFailureStreak++;
+  if (ipFailureStreak >= 2) {
+    ipFailureStreak = 0;
+    await handleDeadKey();
+  }
+}
+
+async function handleDeadKey() {
+  toast("Впн не работает — этот ключ больше не действует. Вставьте новый (его выдаёт бот).", true);
+  try {
+    await invoke("disconnect");
+  } catch {
+    // не страшно — ниже refreshStatus всё равно приведёт статус в порядок
+  }
+  const up = await refreshStatus();
+  await render(up);
 }
 
 async function toggleDemo() {
@@ -352,4 +399,5 @@ el.pasteButton.addEventListener("click", async () => {
   await render(up);
   checkIp();
   setInterval(refreshStatus, 2000);
+  setInterval(watchKeyStillWorks, 15000);
 })();
