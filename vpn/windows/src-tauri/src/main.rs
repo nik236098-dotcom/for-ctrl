@@ -15,6 +15,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::Manager;
 
+/// Обычный `Command::new` из консольного приложения на Windows на долю
+/// секунды показывает мелькающее окно консоли — заметно, когда его дёргают
+/// раз в 2 секунды (опрос статуса тунеля). CREATE_NO_WINDOW убирает это
+/// окно полностью, поведение команды не меняет.
+fn new_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 const PREFIX: &str = "ruvpn://";
 const DEMO_KEY: &str = "test1590";
 const DEMO_SENTINEL: &str = "demo:test1590";
@@ -291,7 +306,7 @@ async fn install_wireguard() -> Result<(), String> {
         return Ok(());
     }
     let installer = download_installer().await?;
-    let status = Command::new(&installer)
+    let status = new_command(&installer)
         .status()
         .map_err(|e| format!("не удалось запустить установщик: {e}"))?;
     fs::remove_file(&installer).ok();
@@ -318,7 +333,7 @@ async fn connect(config_text: String) -> Result<(), String> {
     let conf_path = conf_dir.join(format!("{TUNNEL_NAME}.conf"));
     fs::write(&conf_path, &config_text).map_err(|e| e.to_string())?;
 
-    let output = Command::new(wireguard_exe())
+    let output = new_command(wireguard_exe())
         .arg("/installtunnelservice")
         .arg(&conf_path)
         .output()
@@ -338,7 +353,7 @@ async fn connect(config_text: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn disconnect() -> Result<(), String> {
-    let output = Command::new(wireguard_exe())
+    let output = new_command(wireguard_exe())
         .arg("/uninstalltunnelservice")
         .arg(TUNNEL_NAME)
         .output()
@@ -366,7 +381,7 @@ struct TunnelStatus {
 }
 
 fn service_running(service_name: &str) -> bool {
-    match Command::new("sc").arg("query").arg(service_name).output() {
+    match new_command("sc").arg("query").arg(service_name).output() {
         Ok(output) => String::from_utf8_lossy(&output.stdout).contains("RUNNING"),
         Err(_) => false,
     }
