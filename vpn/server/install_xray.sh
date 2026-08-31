@@ -52,12 +52,14 @@ command -v xray >/dev/null || die "xray не установился"
 
 info "Генерируем ключи Reality"
 # Формат вывода `xray x25519` менялся между версиями — старые пишут
-# "Private key:"/"Public key:", новые (25.3.6+) "PrivateKey:"/"Password:"
-# (то же самое значение, просто переименовали, чтобы его не постили бездумно
-# в чаты — им можно прощупывать Reality-сервер). Понимаем оба варианта.
+# "Private key:"/"Public key:", новые (25.3.6+) "PrivateKey:"/"Password:", а в
+# 26.3.27 (проверено вживую) и вовсе "Password (PublicKey):" — между словом и
+# двоеточием ещё текст в скобках. Поэтому не требуем двоеточие сразу после
+# слова: матчим по началу строки, а всё до первого ":" просто отрезаем —
+# так переживёт и следующее переименование, если оно снова добавит суффикс.
 X25519_OUT="$(xray x25519)"
-REALITY_PRIVATE_KEY="$(echo "$X25519_OUT" | grep -iE '^(private ?key):' | head -1 | sed -E 's/^[^:]+:[[:space:]]*//')"
-REALITY_PUBLIC_KEY="$(echo "$X25519_OUT" | grep -iE '^(password|public ?key):' | head -1 | sed -E 's/^[^:]+:[[:space:]]*//')"
+REALITY_PRIVATE_KEY="$(echo "$X25519_OUT" | grep -iE '^private' | head -1 | sed -E 's/^[^:]+:[[:space:]]*//')"
+REALITY_PUBLIC_KEY="$(echo "$X25519_OUT" | grep -iE '^(password|public)' | head -1 | sed -E 's/^[^:]+:[[:space:]]*//')"
 [[ -n "$REALITY_PRIVATE_KEY" && -n "$REALITY_PUBLIC_KEY" ]] || die "не удалось разобрать вывод xray x25519:\n${X25519_OUT}"
 
 REALITY_SHORT_ID="$(openssl rand -hex 8)"
