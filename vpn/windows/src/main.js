@@ -4,10 +4,11 @@ const el = {
   ip: document.getElementById("textIp"),
   ipRow: document.getElementById("ipRow"),
   changeServerHint: document.getElementById("textChangeServerHint"),
+  powerOff: document.getElementById("imagePowerOff"),
   powerOn: document.getElementById("imagePowerOn"),
   toggle: document.getElementById("buttonToggle"),
   status: document.getElementById("textStatus"),
-  progress: document.getElementById("progress"),
+  connectingRing: document.getElementById("connectingRing"),
   received: document.getElementById("textReceived"),
   sent: document.getElementById("textSent"),
   keyButton: document.getElementById("buttonKey"),
@@ -124,7 +125,8 @@ async function render(up) {
 function setBusy(value) {
   busy = value;
   el.toggle.disabled = value;
-  el.progress.hidden = !value;
+  el.connectingRing.hidden = !value;
+  el.powerOff.classList.toggle("connecting", value);
   if (value) {
     el.status.textContent = "Наводим связь…";
     el.status.classList.remove("up");
