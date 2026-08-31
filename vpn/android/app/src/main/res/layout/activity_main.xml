@@ -43,13 +43,21 @@
                 android:textSize="34sp" />
 
             <!-- Ваш ip: значок глобуса того же размера, что и текст, флаг
-                 страны — обычный эмодзи, система рисует его сама. -->
+                 страны — обычный эмодзи, система рисует его сама. Кликом
+                 открывается выбор сервера (см. dialog_country.xml) —
+                 подсказка под ней показывается, только если сохранённый
+                 ключ вообще можно переключить (см. KeyStore.hasSwitchableCode). -->
             <LinearLayout
+                android:id="@+id/ipRow"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
                 android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:paddingVertical="4dp">
 
                 <ImageView
                     android:id="@+id/imageGlobe"
@@ -68,6 +76,17 @@
                     android:textColor="@color/ink"
                     android:textSize="18sp" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/textChangeServerHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:fontFamily="@font/jetbrains_mono_regular"
+                android:text="@string/change_server_hint"
+                android:textColor="@color/ink_soft"
+                android:textSize="12sp"
+                android:visibility="gone" />
 
             <!-- Растягивается на весь свободный остаток — заголовок и IP не
                  липнут к кнопке, а кнопка не липнет к верху экрана. -->

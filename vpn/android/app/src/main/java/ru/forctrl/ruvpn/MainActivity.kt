@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.forctrl.ruvpn.databinding.ActivityMainBinding
+import ru.forctrl.ruvpn.databinding.DialogCountryBinding
 import ru.forctrl.ruvpn.databinding.DialogKeyBinding
 import java.util.Locale
 
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.buttonToggle.setOnClickListener { onToggleClicked() }
         binding.buttonKey.setOnClickListener { showKeyDialog() }
+        binding.ipRow.setOnClickListener { showCountryDialog() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -198,16 +200,90 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             runCatching {
                 val resolved = KeyStore.resolve(text)
-                KeyStore.parse(resolved) // проверка, что это и правда конфиг тунеля
+                KeyStore.parse(resolved.text) // проверка, что это и правда конфиг тунеля
                 resolved
             }
                 .onSuccess { resolved ->
-                    KeyStore.save(this@MainActivity, resolved)
+                    KeyStore.save(this@MainActivity, resolved.text, resolved.code)
                     toast(getString(R.string.key_saved))
                     render(VpnManager.state.value)
                 }
                 .onFailure { toast(getString(R.string.error_bad_key, it.messageOrClass())) }
         }
+    }
+
+    /**
+     * Клик по своему ip: если сохранённый ключ пришёл коротким кодом от
+     * бота — можно сменить страну (тот же код переспрашивается у сервера
+     * ключей с другим параметром страны, второй ключ вводить не нужно).
+     * Для вставленного вручную конфига или старого base64-ключа кода нет —
+     * тогда просто подсказываем, что нужен ключ от бота.
+     */
+    private fun showCountryDialog() {
+        if (!KeyStore.hasSwitchableCode(this)) {
+            toast(getString(R.string.error_no_switch))
+            return
+        }
+        val dialogBinding = DialogCountryBinding.inflate(layoutInflater)
+        val dialog = AlertDialog.Builder(this).setView(dialogBinding.root).create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        fun highlight(selected: String) {
+            for ((button, country) in listOf(
+                dialogBinding.buttonCountryRu to "ru",
+                dialogBinding.buttonCountryUs to "us",
+            )) {
+                val on = selected == country
+                button.setBackgroundColor(getColor(if (on) R.color.cyan else android.R.color.transparent))
+                button.setTextColor(getColor(if (on) R.color.space_deep else R.color.cyan))
+            }
+        }
+        highlight(KeyStore.currentCountry(this))
+
+        dialogBinding.buttonCountryRu.setOnClickListener { switchCountry("ru", dialog, ::highlight) }
+        dialogBinding.buttonCountryUs.setOnClickListener { switchCountry("us", dialog, ::highlight) }
+        dialogBinding.textCountryCancel.setOnClickListener { dialog.dismiss() }
+
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.88).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
+    }
+
+    private fun switchCountry(country: String, dialog: AlertDialog, highlight: (String) -> Unit) {
+        if (KeyStore.currentCountry(this) == country) {
+            dialog.dismiss()
+            return
+        }
+        val wasUp = VpnManager.state.value == Tunnel.State.UP
+        lifecycleScope.launch {
+            runCatching { KeyStore.switchCountry(this@MainActivity, country) }
+                .onSuccess { changed ->
+                    if (!changed) {
+                        toast(getString(R.string.error_no_switch))
+                        return@onSuccess
+                    }
+                    highlight(country)
+                    toast(getString(R.string.server_changed))
+                    dialog.dismiss()
+                    if (wasUp) reconnectWithSavedKey()
+                }
+                .onFailure { toast(getString(R.string.error_switch_failed, it.messageOrClass())) }
+        }
+    }
+
+    /** После смены страны, если тунель уже был поднят — переподключаемся на новый конфиг. */
+    private suspend fun reconnectWithSavedKey() {
+        setBusy(true)
+        runCatching { VpnManager.setState(up = false, config = null) }
+        val config = currentConfig()
+        if (config != null) {
+            runCatching { VpnManager.setState(up = true, config = config) }
+                .onFailure { toast(getString(R.string.error_connect, it.messageOrClass())) }
+        }
+        setBusy(false)
+        checkIp()
     }
 
     /** [onlyIfLooksLikeKey] — для автоподстановки при открытии; false — для явной кнопки «Вставить». */
@@ -274,6 +350,8 @@ class MainActivity : AppCompatActivity() {
         binding.buttonKey.setText(
             if (hasAnyKey) R.string.replace_key else R.string.paste_key,
         )
+        binding.textChangeServerHint.visibility =
+            if (KeyStore.hasSwitchableCode(this)) View.VISIBLE else View.GONE
         if (!up) {
             binding.textReceived.text = getString(R.string.traffic_placeholder)
             binding.textSent.text = getString(R.string.traffic_placeholder)

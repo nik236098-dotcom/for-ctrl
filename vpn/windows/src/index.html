@@ -11,10 +11,11 @@
   <div class="screen">
     <h1 class="title">Ru VPN</h1>
 
-    <div class="ip-row">
+    <button id="ipRow" class="ip-row">
       <img class="globe" src="assets/ic_globe.png" alt="" />
       <span id="textIp">Ваш ip: …</span>
-    </div>
+    </button>
+    <div id="textChangeServerHint" class="change-server-hint" hidden>Нажмите, чтобы сменить</div>
 
     <div class="spacer"></div>
 
@@ -53,6 +54,16 @@
         <button id="textCancel" class="text-action cancel">Отмена</button>
         <button id="textDone" class="text-action done">Готово</button>
       </div>
+    </div>
+  </div>
+
+  <div id="overlayCountry" class="overlay" hidden>
+    <div class="dialog-card">
+      <div class="dialog-title">Сервер</div>
+      <div class="dialog-help">Откуда будет ваш ip</div>
+      <button id="buttonCountryRu" class="flat-button country-button">Россия 🇷🇺</button>
+      <button id="buttonCountryUs" class="flat-button country-button">США 🇺🇸</button>
+      <button id="textCountryCancel" class="country-cancel">Отмена</button>
     </div>
   </div>
 

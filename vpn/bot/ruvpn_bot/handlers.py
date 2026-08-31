@@ -20,7 +20,7 @@ from aiogram.types import (
 )
 
 from .config import Config, Plan
-from .db import Storage, User
+from .db import Device, Storage, User
 from .payments import CryptoPay, CryptoPayError
 from .wg import Wireguard, WgError, human_bytes
 
@@ -28,12 +28,29 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
+@dataclass(frozen=True)
+class ServerInfo:
+    """Один сервер WireGuard: локальный (Россия) или по SSH (см. wg.SshTarget)."""
+
+    label: str
+    wg: Wireguard
+
+
 @dataclass
 class Deps:
     cfg: Config
     db: Storage
-    wg: Wireguard
+    servers: dict[str, ServerInfo]
     crypto: CryptoPay | None
+
+    @property
+    def wg(self) -> Wireguard:
+        """Домашний сервер (Россия) — им пользуются все места, которые
+        трогают только один сервер по умолчанию: выдача первого ключа,
+        /status и /stats (счётчики трафика там — только по России, у
+        «зеркал» в других странах своя статистика на другом сервере,
+        отдельно не агрегируется)."""
+        return self.servers["ru"].wg
 
 
 # --- вспомогательное --------------------------------------------------------
@@ -235,7 +252,10 @@ async def issue_key(message: Message, deps: Deps, tg_id: int, title_arg: str) ->
         )
         return
 
-    devices = deps.db.devices(tg_id)
+    # Только «домашние» (Россия) — «зеркало» в другой стране открывается тем
+    # же самым ключом (см. resolve_region_config), это не второй купленный
+    # ключ и в лимит max_devices не должно считаться.
+    devices = deps.db.devices(tg_id, country="ru")
     if len(devices) >= deps.cfg.max_devices:
         await message.answer(
             f"Уже выдано ключей: {len(devices)} из {deps.cfg.max_devices}.\n"
@@ -247,7 +267,7 @@ async def issue_key(message: Message, deps: Deps, tg_id: int, title_arg: str) ->
 
     used = {
         device.client_name
-        for device in deps.db.devices(tg_id, include_revoked=True)
+        for device in deps.db.devices(tg_id, include_revoked=True, country="ru")
     }
     index = 0
     while _device_name(tg_id, index) in used:
@@ -332,13 +352,25 @@ async def cmd_drop(message: Message, command: CommandObject, deps: Deps) -> None
         return
 
     device = devices[int(raw) - 1]
+    server = deps.servers.get(device.country)
+    if server is None:
+        await message.answer(
+            f"Сервер «{device.country}» сейчас не настроен — обратитесь к владельцу."
+        )
+        return
     try:
-        await deps.wg.remove_client(device.client_name)
+        await server.wg.remove_client(device.client_name)
     except WgError as exc:
         await message.answer(f"Не удалось удалить: {exc}")
         return
 
     deps.db.mark_device_revoked(device.client_name)
+    # Если это было «зеркало» в другой стране — сотрём и закэшированный
+    # конфиг, иначе сервер ключей продолжил бы отдавать конфиг уже снятого
+    # пира (см. resolve_region_config).
+    region = deps.db.key_region_by_client_name(device.client_name)
+    if region is not None:
+        deps.db.delete_key_region(*region)
     await message.answer(f"Ключ «{html.escape(device.title)}» удалён навсегда.")
 
 
@@ -516,14 +548,30 @@ async def cmd_stats(message: Message, deps: Deps) -> None:
 # --- операции над ключами, общие для команд и фоновых задач ------------------
 
 
+def _server_for(deps: Deps, device: Device) -> ServerInfo | None:
+    server = deps.servers.get(device.country)
+    if server is None:
+        log.warning(
+            "сервер «%s» не настроен, пропускаю устройство %s",
+            device.country,
+            device.client_name,
+        )
+    return server
+
+
 async def suspend_devices(deps: Deps, tg_id: int) -> int:
-    """Выключает все работающие ключи пользователя. Ключи сохраняются."""
+    """Выключает все работающие ключи пользователя — на всех серверах
+    разом (иначе смена страны в приложении обходила бы отключение за
+    неуплату). Ключи сохраняются."""
     count = 0
     for device in deps.db.devices(tg_id):
         if device.suspended:
             continue
+        server = _server_for(deps, device)
+        if server is None:
+            continue
         try:
-            await deps.wg.suspend_client(device.client_name)
+            await server.wg.suspend_client(device.client_name)
         except WgError as exc:
             log.warning("не удалось выключить %s: %s", device.client_name, exc)
             continue
@@ -533,19 +581,74 @@ async def suspend_devices(deps: Deps, tg_id: int) -> int:
 
 
 async def resume_devices(deps: Deps, tg_id: int) -> int:
-    """Включает обратно ключи после оплаты."""
+    """Включает обратно ключи после оплаты — на всех серверах разом."""
     count = 0
     for device in deps.db.devices(tg_id):
         if not device.suspended:
             continue
+        server = _server_for(deps, device)
+        if server is None:
+            continue
         try:
-            await deps.wg.resume_client(device.client_name)
+            await server.wg.resume_client(device.client_name)
         except WgError as exc:
             log.warning("не удалось включить %s: %s", device.client_name, exc)
             continue
         deps.db.mark_device_suspended(device.client_name, False)
         count += 1
     return count
+
+
+async def resolve_region_config(deps: Deps, code: str, country: str) -> str | None:
+    """Конфиг тунеля по короткому коду для нужной страны — то, что отдаёт
+    сервер ключей (см. keyserver.py).
+
+    'ru' — тот, что выдан при самой выдаче ключа (issue_key), как и раньше.
+    Любая другая настроенная страна — «зеркало» того же самого кода на
+    другом сервере: при первом обращении заводится там лениво (человек
+    ничего заново не вводит — просто выбирает страну в приложении).
+    """
+    if country == "ru":
+        return deps.db.key_config(code)
+    server = deps.servers.get(country)
+    if server is None:
+        return None
+
+    cached = deps.db.key_region_config(code, country)
+    if cached is not None:
+        return cached
+
+    base_client_name = deps.db.key_client_name(code)
+    if base_client_name is None:
+        return None
+    owner = deps.db.device(base_client_name)
+    if owner is None:
+        return None
+    user = deps.db.user(owner.tg_id)
+    if user is None or not user.active or owner.suspended:
+        # Не заводим новый рабочий тунель тому, у кого доступ и так не
+        # активен — иначе смена страны в приложении обходила бы отключение
+        # за неуплату.
+        return None
+
+    region_client_name = f"{base_client_name}-{country}"
+    ip = await server.wg.add_client(region_client_name)
+    config_text = await server.wg.client_config(region_client_name)
+
+    if deps.db.device(region_client_name) is None:
+        deps.db.add_device(
+            region_client_name,
+            owner.tg_id,
+            f"{owner.title} ({server.label})",
+            ip,
+            country=country,
+        )
+    else:
+        # Уже было — например, человек снёс это «зеркало» /drop-ом раньше,
+        # а теперь снова выбрал ту же страну.
+        deps.db.revive_device(region_client_name, ip)
+    deps.db.store_key_region(code, country, region_client_name, config_text)
+    return config_text
 
 
 async def notify(bot: Bot, tg_id: int, text: str) -> None:

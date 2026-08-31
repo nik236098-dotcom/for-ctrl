@@ -13,10 +13,10 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from . import config as config_module
 from .config import Config
 from .db import Storage
-from .handlers import Deps, notify, resume_devices, router, suspend_devices
+from .handlers import Deps, ServerInfo, notify, resume_devices, router, suspend_devices
 from .keyserver import start as start_keyserver
 from .payments import CryptoPay, CryptoPayError
-from .wg import Wireguard
+from .wg import SshTarget, Wireguard
 
 log = logging.getLogger("ruvpn_bot")
 
@@ -36,6 +36,30 @@ def build_bot(cfg: Config) -> Bot:
 
 PAYMENT_CHECK_SECONDS = 60
 WARN_DAYS_BEFORE = 3
+
+
+def build_servers(cfg: Config) -> dict[str, ServerInfo]:
+    """Россия — всегда локально, как и было. США — по SSH, только если
+    заполнены US_SSH_* в .env; иначе кнопка страны в приложении просто не
+    будет работать для неё (сервер ключей ответит 404 на ?country=us)."""
+    servers = {
+        "ru": ServerInfo(label="Россия 🇷🇺", wg=Wireguard(cfg.scripts_dir, cfg.wg_iface)),
+    }
+    if cfg.us_enabled:
+        servers["us"] = ServerInfo(
+            label="США 🇺🇸",
+            wg=Wireguard(
+                cfg.us_scripts_dir,
+                cfg.us_wg_iface,
+                ssh=SshTarget(
+                    host=cfg.us_ssh_host,
+                    user=cfg.us_ssh_user,
+                    key_path=cfg.us_ssh_key_path,
+                    port=cfg.us_ssh_port,
+                ),
+            ),
+        )
+    return servers
 
 
 def load_dotenv(path: Path) -> None:
@@ -151,7 +175,7 @@ async def main() -> None:
     deps = Deps(
         cfg=cfg,
         db=Storage(cfg.db_path),
-        wg=Wireguard(cfg.scripts_dir, cfg.wg_iface),
+        servers=build_servers(cfg),
         crypto=CryptoPay(cfg.crypto_pay_token, cfg.crypto_pay_testnet)
         if cfg.payments_enabled
         else None,
@@ -162,7 +186,7 @@ async def main() -> None:
     dispatcher.include_router(router)
 
     keyserver_runner = await start_keyserver(
-        deps.db, cfg.key_server_host, cfg.key_server_port
+        deps, cfg.key_server_host, cfg.key_server_port
     )
 
     tasks = [asyncio.create_task(enforce_terms(bot, deps))]
@@ -174,10 +198,11 @@ async def main() -> None:
         log.info("оплата не настроена — доступ продлевает админ командой /extend")
 
     log.info(
-        "бот запущен: тарифов %s, пробных дней %s, проверка сроков раз в %s с",
+        "бот запущен: тарифов %s, пробных дней %s, проверка сроков раз в %s с, серверов: %s",
         len(cfg.plans),
         cfg.trial_days,
         cfg.enforce_interval,
+        ", ".join(deps.servers),
     )
     try:
         await dispatcher.start_polling(bot, deps=deps)

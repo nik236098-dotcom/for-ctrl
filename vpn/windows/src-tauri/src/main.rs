@@ -19,6 +19,7 @@ const PREFIX: &str = "ruvpn://";
 const DEMO_KEY: &str = "test1590";
 const DEMO_SENTINEL: &str = "demo:test1590";
 const TUNNEL_NAME: &str = "ruvpn";
+const DEFAULT_COUNTRY: &str = "ru";
 
 /// Адрес сервера ключей — вшивается на этапе сборки (см. .github/workflows,
 /// переменная окружения KEY_SERVER_URL при `cargo build`), точно так же, как
@@ -35,6 +36,45 @@ fn key_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("key.txt"))
 }
 
+fn meta_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("key_meta.json"))
+}
+
+/// Код (если ключ пришёл коротким кодом от бота — не вставленным вручную
+/// конфигом и не старым base64-ключом) и текущая выбранная страна. Только
+/// имея код можно сменить страну позже — см. [switch_country].
+#[derive(Serialize, serde::Deserialize)]
+struct Meta {
+    code: Option<String>,
+    country: String,
+}
+
+fn read_meta(app: &tauri::AppHandle) -> Option<Meta> {
+    let path = meta_file(app).ok()?;
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn write_meta(app: &tauri::AppHandle, code: Option<&str>, country: &str) -> Result<(), String> {
+    let path = meta_file(app)?;
+    match code {
+        None => {
+            fs::remove_file(&path).ok();
+            Ok(())
+        }
+        Some(code) => {
+            let meta = Meta {
+                code: Some(code.to_string()),
+                country: country.to_string(),
+            };
+            let text = serde_json::to_string(&meta).map_err(|e| e.to_string())?;
+            fs::write(path, text).map_err(|e| e.to_string())
+        }
+    }
+}
+
 #[tauri::command]
 fn load_key(app: tauri::AppHandle) -> Option<String> {
     let path = key_file(&app).ok()?;
@@ -47,21 +87,71 @@ fn load_key(app: tauri::AppHandle) -> Option<String> {
     }
 }
 
+/// [code] — короткий код, которым это получено (см. [resolve_key]), если
+/// получено им; None — вставили готовый конфиг или старый base64-ключ,
+/// смена страны для такого недоступна.
 #[tauri::command]
-fn save_key(app: tauri::AppHandle, text: String) -> Result<(), String> {
+fn save_key(app: tauri::AppHandle, text: String, code: Option<String>) -> Result<(), String> {
     let path = key_file(&app)?;
-    fs::write(path, text.trim()).map_err(|e| e.to_string())
+    fs::write(path, text.trim()).map_err(|e| e.to_string())?;
+    write_meta(&app, code.as_deref(), DEFAULT_COUNTRY)
 }
 
 #[tauri::command]
 fn save_demo(app: tauri::AppHandle) -> Result<(), String> {
     let path = key_file(&app)?;
-    fs::write(path, DEMO_SENTINEL).map_err(|e| e.to_string())
+    fs::write(path, DEMO_SENTINEL).map_err(|e| e.to_string())?;
+    write_meta(&app, None, DEFAULT_COUNTRY)
 }
 
 #[tauri::command]
 fn is_demo(app: tauri::AppHandle) -> bool {
     load_key(app).as_deref() == Some(DEMO_SENTINEL)
+}
+
+/// Текущая выбранная страна ("ru", если ключ не менял страну ни разу или
+/// у него нет кода для смены).
+#[tauri::command]
+fn current_country(app: tauri::AppHandle) -> String {
+    read_meta(&app)
+        .map(|meta| meta.country)
+        .unwrap_or_else(|| DEFAULT_COUNTRY.to_string())
+}
+
+/// Доступна ли смена страны для сохранённого ключа — только для тех, что
+/// пришли коротким кодом.
+#[tauri::command]
+fn has_switchable_code(app: tauri::AppHandle) -> bool {
+    read_meta(&app).and_then(|meta| meta.code).is_some()
+}
+
+/// Меняет сервер (страну) для уже сохранённого ключа: тот же самый код,
+/// что уже ввели, просто переспрашивается у сервера ключей с другой
+/// страной. Возвращает false, если у сохранённого ключа нет кода — тогда
+/// снаружи ничего не менялось (это вставленный вручную конфиг).
+#[tauri::command]
+async fn switch_country(app: tauri::AppHandle, country: String) -> Result<bool, String> {
+    let meta = match read_meta(&app) {
+        Some(meta) => meta,
+        None => return Ok(false),
+    };
+    let code = match meta.code {
+        Some(code) => code,
+        None => return Ok(false),
+    };
+    if meta.country == country {
+        return Ok(true);
+    }
+    let text = fetch_config(&code, &country).await?;
+    // Проверку, что это действительно рабочий конфиг тунеля, здесь не
+    // делаем (в отличие от Android с её встроенным парсером WireGuard) —
+    // сервер ключей и так отдаёт уже готовый конфиг; настоящая проверка
+    // произойдёт при попытке подключиться (connect() отдаст ошибку от
+    // самого wireguard.exe, если там что-то не так).
+    let key_path = key_file(&app)?;
+    fs::write(key_path, text.trim()).map_err(|e| e.to_string())?;
+    write_meta(&app, Some(&code), &country)?;
+    Ok(true)
 }
 
 // --- разбор ключа --------------------------------------------------------
@@ -96,12 +186,12 @@ fn looks_like_key(text: String) -> bool {
     is_short_code(value)
 }
 
-async fn fetch_config(code: &str) -> Result<String, String> {
+async fn fetch_config(code: &str, country: &str) -> Result<String, String> {
     let base = key_server_url().trim_end_matches('/');
     if base.is_empty() {
         return Err("адрес сервера ключей не задан в этой сборке".to_string());
     }
-    let url = format!("{base}/key/{code}");
+    let url = format!("{base}/key/{code}?country={country}");
     let response = reqwest::Client::new()
         .get(&url)
         .timeout(Duration::from_secs(10))
@@ -128,24 +218,37 @@ fn decode_legacy(payload: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| e.to_string())
 }
 
+/// Результат [resolve_key]: готовый конфиг и код, которым он получен (None —
+/// если это был вставленный вручную конфиг или старый base64-ключ, без
+/// короткого кода — тогда смена страны для него недоступна).
+#[derive(Serialize)]
+struct ResolvedKey {
+    text: String,
+    code: Option<String>,
+}
+
 /// Превращает вставленный текст в настоящий конфиг тунеля — см.
-/// KeyStore.kt::resolve на Android, логика та же самая.
+/// KeyStore.kt::resolve на Android, логика та же самая. Страна при первой
+/// вставке всегда домашняя (DEFAULT_COUNTRY) — сменить её можно уже после,
+/// через [switch_country].
 #[tauri::command]
-async fn resolve_key(text: String) -> Result<String, String> {
+async fn resolve_key(text: String) -> Result<ResolvedKey, String> {
     let value = text.trim().to_string();
     let lower = value.to_ascii_lowercase();
     if !lower.starts_with(&PREFIX.to_ascii_lowercase()) {
         return if is_short_code(&value) {
-            fetch_config(&value).await
+            let config = fetch_config(&value, DEFAULT_COUNTRY).await?;
+            Ok(ResolvedKey { text: config, code: Some(value) })
         } else {
-            Ok(value)
+            Ok(ResolvedKey { text: value, code: None })
         };
     }
-    let payload = value[PREFIX.len()..].trim();
-    if is_short_code(payload) {
-        fetch_config(payload).await
+    let payload = value[PREFIX.len()..].trim().to_string();
+    if is_short_code(&payload) {
+        let config = fetch_config(&payload, DEFAULT_COUNTRY).await?;
+        Ok(ResolvedKey { text: config, code: Some(payload) })
     } else {
-        decode_legacy(payload)
+        Ok(ResolvedKey { text: decode_legacy(&payload)?, code: None })
     }
 }
 
@@ -390,6 +493,9 @@ fn main() {
             is_demo_key,
             looks_like_key,
             resolve_key,
+            current_country,
+            has_switchable_code,
+            switch_country,
             wireguard_installed,
             install_wireguard,
             connect,

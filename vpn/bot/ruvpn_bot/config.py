@@ -70,9 +70,23 @@ class Config:
     key_server_port: int
     telegram_proxy: str
 
+    # Второй сервер (США) — для смены страны в приложении, см.
+    # wg.SshTarget и handlers.build_servers. Пусто — второго сервера нет,
+    # доступна только Россия (как и раньше).
+    us_ssh_host: str
+    us_ssh_port: int
+    us_ssh_user: str
+    us_ssh_key_path: Path
+    us_scripts_dir: Path
+    us_wg_iface: str
+
     @property
     def payments_enabled(self) -> bool:
         return bool(self.crypto_pay_token)
+
+    @property
+    def us_enabled(self) -> bool:
+        return bool(self.us_ssh_host)
 
     def is_admin(self, tg_id: int) -> bool:
         return tg_id in self.admin_ids
@@ -109,4 +123,12 @@ def load() -> Config:
         key_server_host=os.getenv("KEY_SERVER_HOST", "0.0.0.0").strip(),
         key_server_port=_int("KEY_SERVER_PORT", 8081),
         telegram_proxy=os.getenv("TELEGRAM_PROXY", "").strip(),
+        us_ssh_host=os.getenv("US_SSH_HOST", "").strip(),
+        us_ssh_port=_int("US_SSH_PORT", 22),
+        us_ssh_user=os.getenv("US_SSH_USER", "root").strip(),
+        us_ssh_key_path=Path(
+            os.getenv("US_SSH_KEY_PATH", "/opt/ruvpn/bot/us_server_key")
+        ),
+        us_scripts_dir=Path(os.getenv("US_SCRIPTS_DIR", "/opt/ruvpn/server")),
+        us_wg_iface=os.getenv("US_WG_IFACE", "wg0").strip(),
     )

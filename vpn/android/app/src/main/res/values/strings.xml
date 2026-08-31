@@ -34,4 +34,13 @@
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
 
     <string name="power_button_description">Кнопка соединения</string>
+
+    <string name="change_server_hint">Нажмите, чтобы сменить</string>
+    <string name="country_dialog_title">Сервер</string>
+    <string name="country_dialog_help">Откуда будет ваш ip</string>
+    <string name="country_ru">Россия 🇷🇺</string>
+    <string name="country_us">США 🇺🇸</string>
+    <string name="server_changed">Сервер изменён</string>
+    <string name="error_no_switch">Смена сервера доступна только для ключа, который выдал бот</string>
+    <string name="error_switch_failed">Не получилось сменить сервер: %1$s</string>
 </resources>

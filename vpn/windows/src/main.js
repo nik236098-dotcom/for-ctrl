@@ -2,6 +2,8 @@ const invoke = window.__TAURI__.core.invoke;
 
 const el = {
   ip: document.getElementById("textIp"),
+  ipRow: document.getElementById("ipRow"),
+  changeServerHint: document.getElementById("textChangeServerHint"),
   powerOn: document.getElementById("imagePowerOn"),
   toggle: document.getElementById("buttonToggle"),
   status: document.getElementById("textStatus"),
@@ -14,6 +16,10 @@ const el = {
   pasteButton: document.getElementById("buttonPasteClipboard"),
   cancel: document.getElementById("textCancel"),
   done: document.getElementById("textDone"),
+  overlayCountry: document.getElementById("overlayCountry"),
+  countryRu: document.getElementById("buttonCountryRu"),
+  countryUs: document.getElementById("buttonCountryUs"),
+  countryCancel: document.getElementById("textCountryCancel"),
   toast: document.getElementById("toast"),
 };
 
@@ -78,6 +84,7 @@ async function render(up) {
   }
 
   el.keyButton.textContent = (await hasAnyKey()) ? "Заменить ключ" : "Вставить ключ";
+  el.changeServerHint.hidden = !(await invoke("has_switchable_code"));
 
   if (!shown) {
     el.received.textContent = "0 КБ";
@@ -205,7 +212,7 @@ async function saveKey() {
   }
   try {
     const resolved = await invoke("resolve_key", { text });
-    await invoke("save_key", { text: resolved });
+    await invoke("save_key", { text: resolved.text, code: resolved.code });
     toast("Ключ сохранён");
     closeKeyDialog();
     const up = await refreshStatus();
@@ -214,6 +221,73 @@ async function saveKey() {
     toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ из бота целиком и проверьте интернет.`);
   }
 }
+
+// --- смена сервера (страны) ------------------------------------------------
+
+async function openCountryDialog() {
+  if (!(await invoke("has_switchable_code"))) {
+    toast("Смена сервера доступна только для ключа, который выдал бот");
+    return;
+  }
+  await highlightCountry(await invoke("current_country"));
+  el.overlayCountry.hidden = false;
+}
+
+function closeCountryDialog() {
+  el.overlayCountry.hidden = true;
+}
+
+async function highlightCountry(selected) {
+  el.countryRu.classList.toggle("selected", selected === "ru");
+  el.countryUs.classList.toggle("selected", selected === "us");
+}
+
+async function chooseCountry(country) {
+  if ((await invoke("current_country")) === country) {
+    closeCountryDialog();
+    return;
+  }
+  const wasUp = (await invoke("tunnel_status")).up;
+  try {
+    const changed = await invoke("switch_country", { country });
+    if (!changed) {
+      toast("Смена сервера доступна только для ключа, который выдал бот");
+      return;
+    }
+    await highlightCountry(country);
+    toast("Сервер изменён");
+    closeCountryDialog();
+    if (wasUp) await reconnectWithSavedKey();
+  } catch (err) {
+    toast(`Не получилось сменить сервер: ${messageOf(err)}`);
+  }
+}
+
+async function reconnectWithSavedKey() {
+  setBusy(true);
+  try {
+    await invoke("disconnect");
+  } catch {
+    // тунеля могло уже не быть — не страшно, ниже всё равно поднимаем заново
+  }
+  const key = await invoke("load_key");
+  if (key) {
+    try {
+      await invoke("connect", { configText: key });
+    } catch (err) {
+      toast(`Не удалось соединиться: ${messageOf(err)}`);
+    }
+  }
+  setBusy(false);
+  const up = await refreshStatus();
+  await render(up);
+  checkIp();
+}
+
+el.ipRow.addEventListener("click", openCountryDialog);
+el.countryRu.addEventListener("click", () => chooseCountry("ru"));
+el.countryUs.addEventListener("click", () => chooseCountry("us"));
+el.countryCancel.addEventListener("click", closeCountryDialog);
 
 el.toggle.addEventListener("click", onToggleClicked);
 el.keyButton.addEventListener("click", openKeyDialog);
