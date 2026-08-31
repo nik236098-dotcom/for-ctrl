@@ -252,7 +252,13 @@ async function connectReal() {
   // проверки), а не настоящей ошибкой.
   const up = await refreshStatus();
   await render(up);
-  checkIp();
+  // watchKeyStillWorks() вместо простого checkIp(): если ключ мёртв уже в
+  // момент подключения (не только "стал мёртвым посреди сессии"), раньше
+  // это ловилось только фоновым 15-секундным опросом, который тикает от
+  // момента запуска приложения, а не от момента подключения — реальный
+  // случай мог остаться незамеченным почти минуту. Теперь первая проверка
+  // идёт сразу же, тем же путём, что и фоновая.
+  watchKeyStillWorks();
 }
 
 async function disconnectReal() {
@@ -377,7 +383,9 @@ async function reconnectWithSavedKey() {
   setBusy(false);
   const up = await refreshStatus();
   await render(up);
-  checkIp();
+  // Тот же довод, что и в connectReal(): проверяем сразу же тем же путём,
+  // что и фоновый опрос, а не ждём его следующего тика.
+  watchKeyStillWorks();
 }
 
 el.ipRow.addEventListener("click", openCountryDialog);
@@ -399,5 +407,9 @@ el.pasteButton.addEventListener("click", async () => {
   await render(up);
   checkIp();
   setInterval(refreshStatus, 2000);
-  setInterval(watchKeyStillWorks, 15000);
+  // 8, а не 15 секунд: connectReal()/reconnectWithSavedKey() уже делают
+  // первую проверку сразу при подключении — этот тик нужен только чтобы
+  // как можно быстрее набрать вторую (подтверждающую) неудачу подряд, не
+  // заставляя ждать почти минуту, если ключ оказался мёртвым сразу.
+  setInterval(watchKeyStillWorks, 8000);
 })();

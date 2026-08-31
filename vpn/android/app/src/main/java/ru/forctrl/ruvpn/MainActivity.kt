@@ -84,7 +84,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
-                    delay(15_000)
+                    // 8, а не 15 секунд: connect()/reconnectWithSavedKey() уже делают
+                    // первую проверку сразу при подключении — этот тик нужен только
+                    // чтобы как можно быстрее набрать вторую (подтверждающую) неудачу
+                    // подряд, не заставляя ждать почти минуту, если ключ мёртв сразу.
+                    delay(8_000)
                     watchKeyStillWorks()
                 }
             }
@@ -155,8 +159,13 @@ class MainActivity : AppCompatActivity() {
             runCatching { VpnManager.setState(up = true, config = config) }
                 .onFailure { toast(getString(R.string.error_connect, it.messageOrClass())) }
             setBusy(false)
-            // IP теперь российский (или как получится) — сразу видно, что изменилось.
-            checkIp()
+            // watchKeyStillWorks() вместо простого checkIp(): если ключ мёртв уже в
+            // момент подключения (не только "стал мёртвым посреди сессии"), раньше
+            // это ловил только фоновый опрос, который тикает от запуска приложения,
+            // а не от момента подключения — реальный случай мог остаться незамеченным
+            // почти минуту. Теперь первая проверка идёт сразу же, тем же путём, что
+            // и фоновая (она же обновляет "Ваш ip", как раньше делал checkIp()).
+            watchKeyStillWorks()
         }
     }
 
@@ -302,7 +311,9 @@ class MainActivity : AppCompatActivity() {
                 .onFailure { toast(getString(R.string.error_connect, it.messageOrClass())) }
         }
         setBusy(false)
-        checkIp()
+        // Та же логика, что и в connect(): проверяем сразу же тем же путём, что и
+        // фоновый опрос, а не ждём его следующего тика.
+        watchKeyStillWorks()
     }
 
     /** [onlyIfLooksLikeKey] — для автоподстановки при открытии; false — для явной кнопки «Вставить». */
@@ -335,7 +346,8 @@ class MainActivity : AppCompatActivity() {
             .isSuccess
 
     /**
-     * Пока тунель "включен", раз в 15 секунд тихо проверяем айпи. Два
+     * Пока тунель "включен", раз в 8 секунд тихо проверяем айпи (плюс сразу
+     * же при подключении — см. connect()/reconnectWithSavedKey()). Два
      * подряд неудачных обращения — тунель локально поднят, а ключ на
      * сервере больше не работает (см. комментарий у [ipFailureStreak]).
      * В этом случае сами отключаемся и честно говорим об этом, вместо
