@@ -1,0 +1,62 @@
+name: Сборка Windows-приложения RU VPN
+
+on:
+  push:
+    paths:
+      - "vpn/windows/**"
+      - ".github/workflows/build-vpn-windows.yml"
+  workflow_dispatch:
+
+# Нужно для публикации установщика в релиз.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vpn/windows/src-tauri
+
+      - name: Установка tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # Адрес сервера ключей: приложение меняет на него короткий ключ
+      # (8 символов) на настоящий конфиг тунеля при вставке — тот же секрет,
+      # что и для Android-сборки. Без него вставка короткого кода не сработает.
+      - name: Сборка установщика
+        working-directory: vpn/windows/src-tauri
+        env:
+          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
+        run: cargo tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruvpn-windows-installer
+          path: vpn/windows/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      # Готовый установщик кладём в релиз с постоянным тегом
+      # ruvpn-windows-latest — оттуда его можно скачать по прямой ссылке.
+      - name: Публикация установщика в релиз
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp vpn/windows/src-tauri/target/release/bundle/nsis/*.exe ruvpn-windows-setup.exe
+          gh release delete ruvpn-windows-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ruvpn-windows-latest ruvpn-windows-setup.exe \
+            --target "$GITHUB_SHA" \
+            --title "RU VPN — установщик для Windows" \
+            --notes "Клиент WireGuard для Windows, собран из коммита $GITHUB_SHA.
+
+          При первом подключении, если официальный WireGuard for Windows не
+          установлен, приложение само его тихо ставит (одно окно с
+          прогресс-баром, без кликов) — дальше используется только это
+          приложение. Требует прав администратора (запрашиваются один раз
+          при запуске) — управляет системным сервисом тунеля."
