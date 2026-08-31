@@ -21,6 +21,7 @@ const el = {
   countryUs: document.getElementById("buttonCountryUs"),
   countryCancel: document.getElementById("textCountryCancel"),
   toast: document.getElementById("toast"),
+  ipFlag: document.getElementById("ipFlag"),
 };
 
 // Пока идёт подключение/отключение — статус показывает «Наводим связь…»,
@@ -64,14 +65,32 @@ function formatBytes(bytes) {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-function flagEmoji(countryCode) {
-  if (!countryCode || countryCode.length !== 2) return "";
-  const base = 0x1f1e6 - "A".charCodeAt(0);
-  return countryCode
-    .toUpperCase()
-    .split("")
-    .map((c) => String.fromCodePoint(base + c.charCodeAt(0)))
-    .join("");
+// Тот же приём, что и в диалоге выбора сервера: эмодзи-флаг — это пара
+// «национальных букв» Юникода, которая рисуется как флаг только на свежих
+// версиях Windows со свежим шрифтом, иначе система молча показывает
+// запасной вариант — просто буквы кода страны. SVG не зависит от шрифта.
+function flagSvg(countryCode) {
+  const code = (countryCode || "").toUpperCase();
+  if (code === "RU") {
+    return `<svg class="flag-icon" viewBox="0 0 24 16" aria-hidden="true">
+      <rect width="24" height="16" fill="#fff" />
+      <rect y="5.33" width="24" height="5.34" fill="#0039a6" />
+      <rect y="10.67" width="24" height="5.33" fill="#d52b1e" />
+    </svg>`;
+  }
+  if (code === "US") {
+    return `<svg class="flag-icon" viewBox="0 0 24 16" aria-hidden="true">
+      <rect width="24" height="16" fill="#b22234" />
+      <rect y="1.23" width="24" height="1.23" fill="#fff" />
+      <rect y="3.69" width="24" height="1.23" fill="#fff" />
+      <rect y="6.15" width="24" height="1.23" fill="#fff" />
+      <rect y="8.61" width="24" height="1.23" fill="#fff" />
+      <rect y="11.08" width="24" height="1.23" fill="#fff" />
+      <rect y="13.54" width="24" height="1.23" fill="#fff" />
+      <rect width="9.6" height="8.62" fill="#3c3b6e" />
+    </svg>`;
+  }
+  return "";
 }
 
 async function hasAnyKey() {
@@ -127,10 +146,11 @@ async function refreshStatus() {
 async function checkIp() {
   try {
     const result = await invoke("check_ip");
-    const flag = flagEmoji(result.country_code);
-    el.ip.textContent = `Ваш ip: ${result.ip} ${flag}`.trim();
+    el.ip.textContent = `Ваш ip: ${result.ip}`;
+    el.ipFlag.innerHTML = flagSvg(result.country_code);
   } catch {
     el.ip.textContent = "Ваш ip: недоступно";
+    el.ipFlag.innerHTML = "";
   }
 }
 
@@ -176,14 +196,13 @@ async function connectReal() {
     toast(`Не удалось соединиться: ${connectError}`, true);
   }
   setBusy(false);
+  // connect() на стороне Rust теперь сам ждёт, пока служба тунеля реально
+  // не станет RUNNING, и только тогда отдаёт успех — поэтому отдельно
+  // проверять здесь "а вдруг тихо не поднялся" больше не нужно: это было
+  // ложным срабатыванием (служба ещё не успевала стартовать к моменту
+  // проверки), а не настоящей ошибкой.
   const up = await refreshStatus();
   await render(up);
-  if (!connectError && !up) {
-    // wireguard.exe отчитался об успехе, а служба тунеля на самом деле не
-    // поднялась — раньше это происходило молча (просто "ничего не
-    // произошло"), теперь хотя бы видно, что это именно этот случай.
-    toast("wireguard.exe отчитался об успехе, но тунель не поднялся — сообщите об этом с скриншотом", true);
-  }
   checkIp();
 }
 

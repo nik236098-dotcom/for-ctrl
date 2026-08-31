@@ -472,7 +472,38 @@ async fn connect(config_text: String) -> Result<(), String> {
     // код успевал удалить файл). Файл остаётся лежать (перезаписывается на
     // каждый connect) и удаляется только в disconnect(), когда служба уже
     // снята и файл ей больше не понадобится.
+    if result.is_ok() {
+        // По той же причине, что и с файлом конфига: /installtunnelservice
+        // возвращает успех сразу после регистрации службы в SCM, а реально
+        // она встаёт в RUNNING чуть позже. Раньше мы отдавали "успех" в
+        // интерфейс немедленно — кнопка разблокировалась и статус на долю
+        // секунды показывал "Впн выключен" (настоящий статус ещё не
+        // подтянулся), из-за чего хотелось нажать ещё раз. Теперь ждём
+        // здесь, пока служба не станет реально RUNNING (до 10 секунд), и
+        // только тогда отдаём успех — всё это время кнопка на фронтенде
+        // остаётся заблокированной с надписью "Наводим связь…".
+        let service_name = format!("WireGuardTunnel${TUNNEL_NAME}");
+        if !wait_for_service_running(&service_name, Duration::from_secs(10)).await {
+            result = Err("Служба тунеля зарегистрирована, но не запустилась вовремя".to_string());
+        }
+    }
     result
+}
+
+/// Ждёт, пока служба тунеля реально не перейдёт в состояние RUNNING (или не
+/// истечёт таймаут). Используется только для того, чтобы не отдавать
+/// "успех" наружу раньше, чем тунель по-настоящему поднялся.
+async fn wait_for_service_running(service_name: &str, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if service_running(service_name) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
 }
 
 fn tunnel_conf_path() -> PathBuf {

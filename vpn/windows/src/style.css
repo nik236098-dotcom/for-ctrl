@@ -102,6 +102,16 @@ body {
   height: 20px;
 }
 
+.ip-flag {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ip-flag .flag-icon {
+  width: 20px;
+  height: 13px;
+}
+
 .spacer {
   flex: 1 1 auto;
 }
