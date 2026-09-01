@@ -1,10 +1,15 @@
 """Обёртка над серверными скриптами Xray/Happ (см. vpn/server/*_client_happ.sh).
 
 В отличие от WireGuard-бота тут нет второго сервера и SSH — Xray живёт на
-одном-единственном сервере (см. vpn/README.md «iPhone (Happ)»), и этот бот
+одном-единственном сервере (см. vpn/happ_bot/README.md), и этот бот
 запускается прямо на нём же, поэтому всё — через локальный `sudo -n`.
 Права на команды бот получает через sudoers (см. install_bot.sh), root он не
 получает вообще.
+
+Скрипты вызываются НАПРЯМУЮ (sudo -n /путь/script.sh, без обёртки в bash) —
+это важно: sudoers в install_bot.sh разрешает ровно эту команду, "sudo -n
+bash /путь/script.sh" для него уже другая команда и не пройдёт (реальный
+баг, пойманный вживую — «Добавить устройство» падал именно из-за этого).
 """
 
 from __future__ import annotations
@@ -54,7 +59,7 @@ class Xray:
         текст (см. скрипт) — вытаскиваем из вывода именно строку с vless://.
         """
         output = await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("add_client_happ.sh"), name]
+            _run, ["sudo", "-n", self._script("add_client_happ.sh"), name]
         )
         match = _URI_LINE.search(output)
         if match is None:
@@ -63,7 +68,7 @@ class Xray:
 
     async def client_uri(self, name: str) -> str:
         output = await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("show_client_happ.sh"), name]
+            _run, ["sudo", "-n", self._script("show_client_happ.sh"), name]
         )
         match = _URI_LINE.search(output)
         if match is None:
@@ -72,17 +77,17 @@ class Xray:
 
     async def suspend_client(self, name: str) -> None:
         await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("suspend_client_happ.sh"), name]
+            _run, ["sudo", "-n", self._script("suspend_client_happ.sh"), name]
         )
 
     async def resume_client(self, name: str) -> None:
         await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("resume_client_happ.sh"), name]
+            _run, ["sudo", "-n", self._script("resume_client_happ.sh"), name]
         )
 
     async def remove_client(self, name: str) -> None:
         await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("remove_client_happ.sh"), name]
+            _run, ["sudo", "-n", self._script("remove_client_happ.sh"), name]
         )
 
     async def traffic_by_name(self) -> dict[str, Transfer]:
@@ -94,7 +99,7 @@ class Xray:
         вызов в handlers.py — обёрнут в try/except XrayError).
         """
         output = await asyncio.to_thread(
-            _run, ["sudo", "-n", "bash", self._script("xray_traffic.sh")]
+            _run, ["sudo", "-n", self._script("xray_traffic.sh")]
         )
         try:
             data = json.loads(output)
