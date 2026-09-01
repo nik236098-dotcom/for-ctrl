@@ -65,6 +65,10 @@ class Rename(StatesGroup):
     waiting_name = State()
 
 
+class AddDevice(StatesGroup):
+    waiting_name = State()
+
+
 def main_menu() -> InlineKeyboardMarkup:
     """Главное меню — привязано к сообщению-приветствию (/start) и больше
     никуда: на остальных экранах свои собственные кнопки, без дублирования
@@ -169,13 +173,6 @@ async def show_profile(callback: CallbackQuery, state: FSMContext, deps: Deps) -
 # --- устройства -------------------------------------------------------------
 
 
-def _device_title(tg_id: int, existing_titles: set[str]) -> str:
-    index = 1
-    while f"Устройство {index}" in existing_titles:
-        index += 1
-    return f"Устройство {index}"
-
-
 async def _render_devices(deps: Deps, tg_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
     user = deps.db.user(tg_id)
     if user is None or not user.active:
@@ -211,7 +208,7 @@ async def show_devices_cb(callback: CallbackQuery, state: FSMContext, deps: Deps
 
 
 @router.callback_query(F.data == "device_add")
-async def add_device(callback: CallbackQuery, deps: Deps) -> None:
+async def add_device(callback: CallbackQuery, state: FSMContext, deps: Deps) -> None:
     await callback.answer()
     if callback.message is None:
         return
@@ -228,26 +225,52 @@ async def add_device(callback: CallbackQuery, deps: Deps) -> None:
         )
         return
 
+    await state.set_state(AddDevice.waiting_name)
+    await callback.message.answer(
+        "Как назвать устройство? Например: iPhone 14 Pro\n\n"
+        "Бот не умеет определять модель устройства сам — впишите название, "
+        "как вам удобно, чтобы потом узнавать его в списке."
+    )
+
+
+@router.message(StateFilter(AddDevice.waiting_name))
+async def add_device_finish(message: Message, state: FSMContext, deps: Deps) -> None:
+    await state.clear()
+    tg_id = message.from_user.id
+    user = deps.db.user(tg_id)
+    if user is None or not user.active:
+        await message.answer("Подписка не активна — оплатите доступ.")
+        return
+
+    devices = deps.db.devices(tg_id)
+    if len(devices) >= deps.cfg.max_devices:
+        await message.answer(f"Уже добавлено устройств: {len(devices)} из {deps.cfg.max_devices}.")
+        return
+
+    title = (message.text or "").strip()[:40]
+    if not title:
+        await message.answer("Имя не может быть пустым — попробуйте ещё раз через «Добавить устройство».")
+        return
+
     used = {d.client_name for d in deps.db.devices(tg_id, include_revoked=True)}
     index = 0
     while f"tg{tg_id}-{index}" in used:
         index += 1
     client_name = f"tg{tg_id}-{index}"
-    title = _device_title(tg_id, {d.title for d in devices})
 
     try:
         uri = await deps.xray.add_client(client_name)
     except XrayError as exc:
         log.exception("не удалось выдать ключ %s", client_name)
-        await callback.message.answer(f"Сервер не смог выдать ключ: {exc}")
+        await message.answer(f"Сервер не смог выдать ключ: {exc}")
         return
 
     deps.db.add_device(client_name, tg_id, title)
-    await callback.message.answer(f"Ключ vless\n\n<code>{html.escape(uri)}</code>", parse_mode="HTML")
-    # Реальную отметку об использовании ключа протокол VLESS/Reality не
-    # даёт (нет обратного сигнала от Happ) — считаем «подключённым» сразу
-    # после выдачи, это оптимистичное сообщение, а не подтверждённый факт.
-    await callback.message.answer("Устройство подключено!", reply_markup=devices_button())
+    await message.answer(f"Ключ vless для «{html.escape(title)}»\n\n<code>{html.escape(uri)}</code>", parse_mode="HTML")
+    # Реальную отметку об использовании ключа протокол VLESS/Reality не даёт
+    # (нет обратного сигнала от Happ) — не пишем «подключено», только что
+    # ключ готов к использованию.
+    await message.answer("Ключ создан — добавьте его в приложение Happ.", reply_markup=devices_button())
 
 
 @router.callback_query(F.data.startswith("device_view:"))
