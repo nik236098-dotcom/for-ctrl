@@ -19,6 +19,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from . import rates
 from .config import Config, _days_word
 from .cryptobot import CryptoPay, CryptoPayError
 from .db import Storage
@@ -415,7 +416,16 @@ async def on_pay_method_chosen(callback: CallbackQuery, deps: Deps) -> None:
         if deps.xrocket is None:
             await callback.message.answer("xRocket не подключён.")
             return
-        amount = deps.cfg.usdt_for(plan)
+        try:
+            rate = await rates.usdt_rub_rate()
+            amount = f"{plan.rub / rate:.2f}"
+        except rates.RateError as exc:
+            log.warning(
+                "живой курс USDT/RUB недоступен (%s), беру запасной %.2f",
+                exc,
+                deps.cfg.rub_per_usdt,
+            )
+            amount = deps.cfg.usdt_for(plan)
         try:
             invoice = await deps.xrocket.create_invoice(
                 amount, deps.cfg.xrocket_currency, description, str(user.tg_id)

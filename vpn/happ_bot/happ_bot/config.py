@@ -78,10 +78,13 @@ class Config:
 
     xrocket_api_token: str
     # xRocket не умеет фиатные счета (только крипто-активы) — рублёвую цену
-    # тарифа переводим в USDT по этому курсу перед выставлением счёта. У
-    # CryptoBot всё проще: там есть настоящий фиатный режим (currency_type
-    # "fiat", fiat "RUB"), конвертирует сам CryptoBot по своему курсу.
+    # тарифа переводим в USDT перед выставлением счёта. У CryptoBot всё
+    # проще: там есть настоящий фиатный режим (currency_type "fiat", fiat
+    # "RUB"), конвертирует сам CryptoBot по своему курсу.
     xrocket_currency: str
+    # Курс берётся живым с CoinGecko в момент выставления счёта (см.
+    # rates.usdt_rub_rate) — это значение только ЗАПАСНОЕ, на случай если
+    # CoinGecko недоступен.
     rub_per_usdt: float
 
     scripts_dir: Path
@@ -95,7 +98,8 @@ class Config:
         return tg_id in self.admin_ids
 
     def usdt_for(self, plan: Plan) -> str:
-        """Сумма тарифа в USDT для xRocket — с округлением до цента."""
+        """Сумма тарифа в USDT по ЗАПАСНОМУ курсу — только если живой курс
+        (rates.usdt_rub_rate) не удалось получить, см. handlers.py."""
         amount = plan.rub / self.rub_per_usdt
         return f"{amount:.2f}"
 
