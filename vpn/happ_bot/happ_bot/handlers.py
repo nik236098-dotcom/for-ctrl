@@ -10,7 +10,13 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardRemove,
+)
 
 from . import rates
 from .config import Config, _days_word
@@ -59,24 +65,26 @@ class Rename(StatesGroup):
     waiting_name = State()
 
 
-def main_menu_rows() -> list[list[InlineKeyboardButton]]:
-    """Кнопки главного меню — привязаны прямо к сообщению (не отдельная
-    клавиатура снизу экрана), поэтому их же добавляем внизу каждого экрана,
-    чтобы не нужно было прокручивать обратно к самому первому /start."""
-    return [
-        [InlineKeyboardButton(text=BTN_PROFILE, callback_data="menu:profile")],
-        [InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices")],
-        [InlineKeyboardButton(text=BTN_SUBSCRIBE, callback_data="menu:subscribe")],
-        [InlineKeyboardButton(text=BTN_INSTRUCTIONS, callback_data="menu:instructions")],
-    ]
-
-
 def main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=main_menu_rows())
+    """Главное меню — привязано к сообщению-приветствию (/start) и больше
+    никуда: на остальных экранах свои собственные кнопки, без дублирования
+    всего меню на каждом шагу."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=BTN_PROFILE, callback_data="menu:profile")],
+            [InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices")],
+            [InlineKeyboardButton(text=BTN_SUBSCRIBE, callback_data="menu:subscribe")],
+            [InlineKeyboardButton(text=BTN_INSTRUCTIONS, callback_data="menu:instructions")],
+        ]
+    )
 
 
-def with_menu(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[*rows, *main_menu_rows()])
+def devices_button() -> InlineKeyboardMarkup:
+    """Одна кнопка «Мои устройства» — так, как явно указано в ТЗ после
+    выдачи ключа и после успешной оплаты (не весь список меню)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices")]]
+    )
 
 
 def plans_keyboard(cfg: Config) -> InlineKeyboardMarkup:
@@ -84,7 +92,7 @@ def plans_keyboard(cfg: Config) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=plan.label(), callback_data=f"plan:{index}")]
         for index, plan in enumerate(cfg.plans)
     ]
-    return with_menu(rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def pay_method_keyboard(cfg: Config, plan_index: int) -> InlineKeyboardMarkup:
@@ -97,12 +105,12 @@ def pay_method_keyboard(cfg: Config, plan_index: int) -> InlineKeyboardMarkup:
         rows.append(
             [InlineKeyboardButton(text="Xrocket", callback_data=f"paymethod:{plan_index}:xrocket")]
         )
-    return with_menu(rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def device_detail_keyboard(client_name: str) -> InlineKeyboardMarkup:
-    return with_menu(
-        [
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [InlineKeyboardButton(text="❌Удалить", callback_data=f"device_del:{client_name}")],
             [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"device_ren:{client_name}")],
         ]
@@ -117,6 +125,13 @@ async def cmd_start(message: Message, deps: Deps) -> None:
     user = deps.db.user(message.from_user.id)
     if user is None:
         deps.db.create_user(message.from_user.id, message.from_user.username)
+    # Раньше меню было отдельной клавиатурой снизу экрана (ReplyKeyboardMarkup)
+    # — Telegram держит такую клавиатуру у человека, пока её явно не снять.
+    # После перехода на инлайн-кнопки те старые кнопки у уже писавших боту
+    # людей так и остаются висеть внизу и ничего не делают по нажатию —
+    # снимаем их явно перед новым меню. Если её и не было — эта строка
+    # просто ничего не меняет, безвредно.
+    await message.answer("Открываю меню…", reply_markup=ReplyKeyboardRemove())
     await message.answer(GREETING, reply_markup=main_menu())
 
 
@@ -148,7 +163,7 @@ async def show_profile(callback: CallbackQuery, state: FSMContext, deps: Deps) -
     if callback.message is None:
         return
     text = _profile_text(deps, callback.from_user.id, callback.from_user.username)
-    await callback.message.answer(text, reply_markup=main_menu())
+    await callback.message.answer(text)
 
 
 # --- устройства -------------------------------------------------------------
@@ -161,13 +176,13 @@ def _device_title(tg_id: int, existing_titles: set[str]) -> str:
     return f"Устройство {index}"
 
 
-async def _render_devices(deps: Deps, tg_id: int) -> tuple[str, InlineKeyboardMarkup]:
+async def _render_devices(deps: Deps, tg_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
     user = deps.db.user(tg_id)
     if user is None or not user.active:
         return (
             "<b>❌ У вас нет активной подписки</b>\n\n"
             "Оплатите подписку, чтобы увидеть свои устройства.",
-            with_menu([]),
+            None,
         )
 
     devices = deps.db.devices(tg_id)
@@ -182,7 +197,7 @@ async def _render_devices(deps: Deps, tg_id: int) -> tuple[str, InlineKeyboardMa
         text = f"Устройств пока нету. Доступно {deps.cfg.max_devices}/{deps.cfg.max_devices}"
     else:
         text = f"Добавлено {len(devices)}/{deps.cfg.max_devices}"
-    return text, with_menu(rows)
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(F.data == "menu:devices")
@@ -232,7 +247,7 @@ async def add_device(callback: CallbackQuery, deps: Deps) -> None:
     # Реальную отметку об использовании ключа протокол VLESS/Reality не
     # даёт (нет обратного сигнала от Happ) — считаем «подключённым» сразу
     # после выдачи, это оптимистичное сообщение, а не подтверждённый факт.
-    await callback.message.answer("Устройство подключено!", reply_markup=with_menu([]))
+    await callback.message.answer("Устройство подключено!", reply_markup=devices_button())
 
 
 @router.callback_query(F.data.startswith("device_view:"))
@@ -333,7 +348,7 @@ async def show_instructions(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
     if callback.message is not None:
-        await callback.message.answer(INSTRUCTIONS, reply_markup=main_menu())
+        await callback.message.answer(INSTRUCTIONS)
 
 
 # --- подписка ---------------------------------------------------------------
@@ -346,9 +361,7 @@ async def show_plans(callback: CallbackQuery, state: FSMContext, deps: Deps) -> 
     if callback.message is None:
         return
     if not deps.cfg.payments_enabled:
-        await callback.message.answer(
-            "Оплата пока не подключена — напишите владельцу сервиса.", reply_markup=main_menu()
-        )
+        await callback.message.answer("Оплата пока не подключена — напишите владельцу сервиса.")
         return
     if deps.db.user(callback.from_user.id) is None:
         deps.db.create_user(callback.from_user.id, callback.from_user.username)

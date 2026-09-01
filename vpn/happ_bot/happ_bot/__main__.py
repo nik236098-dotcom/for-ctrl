@@ -11,13 +11,12 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from . import config as config_module
 from .config import Config, _days_word
 from .cryptobot import CryptoPay, CryptoPayError
 from .db import Storage, utcnow
-from .handlers import BTN_DEVICES, Deps, notify, resume_devices, router, suspend_devices
+from .handlers import Deps, devices_button, notify, resume_devices, router, suspend_devices
 from .xray import Xray
 from .xrocket import XRocketPay
 
@@ -86,18 +85,13 @@ async def enforce_terms(bot: Bot, deps: Deps) -> None:
         await asyncio.sleep(deps.cfg.enforce_interval)
 
 
-_DEVICES_BUTTON = InlineKeyboardMarkup(
-    inline_keyboard=[[InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices")]]
-)
-
-
 async def _apply_payment(bot: Bot, deps: Deps, row) -> None:
     deps.db.extend(row["tg_id"], row["days"])
     resumed = await resume_devices(deps, row["tg_id"])
     text = f"✅Подписка успешно оформлена на {row['days']} {_days_word(row['days'])}"
     if not resumed:
         text += "\nПодключите новое устройство и начните пользоваться уже сейчас"
-    await notify(bot, row["tg_id"], text, reply_markup=_DEVICES_BUTTON)
+    await notify(bot, row["tg_id"], text, reply_markup=devices_button())
 
 
 async def cryptobot_watch(bot: Bot, deps: Deps) -> None:
