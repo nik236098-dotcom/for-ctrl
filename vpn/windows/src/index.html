@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Ru VPN</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <img class="bg" src="assets/space_bg.png" alt="" />
+
+  <div class="screen">
+    <h1 class="title">Ru VPN</h1>
+
+    <button id="ipRow" class="ip-row">
+      <img class="globe" src="assets/ic_globe.png" alt="" />
+      <span id="textIp">Ваш ip: …</span>
+      <span id="ipFlag" class="ip-flag"></span>
+    </button>
+    <div id="textChangeServerHint" class="change-server-hint" hidden>Нажмите, чтобы сменить</div>
+
+    <div class="spacer"></div>
+
+    <div class="power-wrap">
+      <img id="imagePowerOff" class="power power-off" src="assets/power_off.png" alt="" />
+      <img id="imagePowerOn" class="power power-on" src="assets/power_on.png" alt="" />
+      <div id="connectingRing" class="connecting-ring" hidden></div>
+      <button id="buttonToggle" class="power-hit" aria-label="Кнопка соединения"></button>
+    </div>
+
+    <div id="textStatus" class="status">Впн выключен</div>
+
+    <div class="traffic-row">
+      <div class="traffic-col">
+        <span class="traffic-label">Получено</span>
+        <span id="textReceived" class="traffic-value">0 КБ</span>
+      </div>
+      <div class="traffic-col">
+        <span class="traffic-label">Отправлено</span>
+        <span id="textSent" class="traffic-value">0 КБ</span>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <button id="buttonKey" class="flat-button">Вставить ключ</button>
+  </div>
+
+  <div id="overlay" class="overlay" hidden>
+    <div class="dialog-card">
+      <div class="dialog-title">Ключ доступа</div>
+      <div class="dialog-help">Вставьте ключ, который прислал бот</div>
+      <textarea id="inputKey" class="key-input" placeholder="Ab3xK9pQ" rows="3"></textarea>
+      <button id="buttonPasteClipboard" class="flat-button">Вставить из буфера</button>
+      <div class="dialog-actions">
+        <button id="textCancel" class="text-action cancel">Отмена</button>
+        <button id="textDone" class="text-action done">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlayCountry" class="overlay" hidden>
+    <div class="dialog-card">
+      <div class="dialog-title">Сервер</div>
+      <div class="dialog-help">Откуда будет ваш ip</div>
+      <button id="buttonCountryRu" class="flat-button country-button">
+        <svg class="flag-icon" viewBox="0 0 24 16" aria-hidden="true">
+          <rect width="24" height="16" fill="#fff" />
+          <rect y="5.33" width="24" height="5.34" fill="#0039a6" />
+          <rect y="10.67" width="24" height="5.33" fill="#d52b1e" />
+        </svg>
+        Россия
+      </button>
+      <button id="buttonCountryUs" class="flat-button country-button">
+        <svg class="flag-icon" viewBox="0 0 24 16" aria-hidden="true">
+          <rect width="24" height="16" fill="#b22234" />
+          <rect y="1.23" width="24" height="1.23" fill="#fff" />
+          <rect y="3.69" width="24" height="1.23" fill="#fff" />
+          <rect y="6.15" width="24" height="1.23" fill="#fff" />
+          <rect y="8.61" width="24" height="1.23" fill="#fff" />
+          <rect y="11.08" width="24" height="1.23" fill="#fff" />
+          <rect y="13.54" width="24" height="1.23" fill="#fff" />
+          <rect width="9.6" height="8.62" fill="#3c3b6e" />
+        </svg>
+        США
+      </button>
+      <button id="textCountryCancel" class="country-cancel">Отмена</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="main.js"></script>
+</body>
+</html>

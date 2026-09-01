@@ -1,0 +1,22 @@
+[Unit]
+Description=RU VPN — телеграм-бот выдачи ключей
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ruvpnbot
+Group=ruvpnbot
+WorkingDirectory=/opt/ruvpn/bot
+EnvironmentFile=/opt/ruvpn/bot/.env
+ExecStart=/opt/ruvpn/bot/venv/bin/python -m ruvpn_bot
+Restart=always
+RestartSec=5
+
+# NoNewPrivileges и ProtectSystem здесь намеренно не включены: бот
+# запускает серверные скрипты через sudo, а те пишут в /etc/wireguard.
+# С этими опциями дочерние процессы потеряли бы такую возможность.
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Всегда тёмная: это открытый космос, светлого варианта у него нет. -->
+    <style name="Theme.RuVPN" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/cyan</item>
+        <item name="colorOnPrimary">@color/space_deep</item>
+        <item name="colorSurface">@color/card</item>
+        <item name="colorOnSurface">@color/ink</item>
+        <item name="colorOutline">@color/card_stroke</item>
+        <item name="android:colorBackground">@color/space_deep</item>
+        <item name="android:statusBarColor">@color/space_deep</item>
+        <item name="android:navigationBarColor">@color/space_deep</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Кнопка внизу: только обводка, фон — сам космос за ней. -->
+    <style name="Widget.RuVPN.Button.Flat" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:fontFamily">@font/jetbrains_mono_regular</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/cyan</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="strokeColor">@color/cyan</item>
+        <item name="strokeWidth">2dp</item>
+        <item name="cornerRadius">18dp</item>
+        <item name="rippleColor">@color/cyan</item>
+        <item name="elevation">0dp</item>
+    </style>
+</resources>

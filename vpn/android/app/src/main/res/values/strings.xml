@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ru VPN</string>
+
+    <string name="status_connected">Впн включен</string>
+    <string name="status_connecting">Наводим связь…</string>
+    <string name="status_disconnected">Впн выключен</string>
+
+    <string name="connect">Соединить</string>
+    <string name="disconnect">Разъединить</string>
+
+    <string name="traffic_received_label">Получено</string>
+    <string name="traffic_sent_label">Отправлено</string>
+    <string name="traffic_placeholder">0 КБ</string>
+
+    <string name="ip_line">Ваш ip: %1$s</string>
+    <string name="ip_placeholder">Ваш ip: …</string>
+    <string name="ip_unavailable">Ваш ip: недоступно</string>
+
+    <string name="paste_key">Вставить ключ</string>
+    <string name="replace_key">Заменить ключ</string>
+    <string name="key_dialog_title">Ключ доступа</string>
+    <string name="key_dialog_hint">Ab3xK9pQ</string>
+    <string name="key_dialog_help">Вставьте ключ, который прислал бот</string>
+    <string name="paste_from_clipboard">Вставить из буфера</string>
+    <string name="done">Готово</string>
+    <string name="cancel">Отмена</string>
+
+    <string name="key_saved">Ключ сохранён</string>
+    <string name="error_no_key">Сначала вставьте ключ — его выдаёт бот</string>
+    <string name="error_bad_key">Не получилось: %1$s. Скопируйте ключ из бота целиком и проверьте интернет.</string>
+    <string name="error_permission_denied">Без разрешения на VPN связи не будет</string>
+    <string name="error_connect">Не удалось соединиться: %1$s</string>
+    <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
+    <string name="error_key_dead">Впн не работает — этот ключ больше не действует. Вставьте новый (его выдаёт бот).</string>
+
+    <string name="power_button_description">Кнопка соединения</string>
+
+    <string name="change_server_hint">Нажмите, чтобы сменить</string>
+    <string name="country_dialog_title">Сервер</string>
+    <string name="country_dialog_help">Откуда будет ваш ip</string>
+    <string name="country_ru">Россия 🇷🇺</string>
+    <string name="country_us">США 🇺🇸</string>
+    <string name="server_changed">Сервер изменён</string>
+    <string name="error_no_switch">Смена сервера доступна только для ключа, который выдал бот</string>
+    <string name="error_switch_failed">Не получилось сменить сервер: %1$s</string>
+</resources>
