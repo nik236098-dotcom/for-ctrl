@@ -42,6 +42,13 @@ def _run(argv: list[str]) -> str:
     return result.stdout
 
 
+async def _run_async(argv: list[str]) -> str:
+    """asyncio.to_thread появился только в Python 3.9, а на сервере пока
+    3.8 — свой вариант через run_in_executor работает и там, и там."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run, argv)
+
+
 class Xray:
     def __init__(self, scripts_dir: Path) -> None:
         self._scripts = scripts_dir
@@ -58,37 +65,27 @@ class Xray:
         add_client_happ.sh кроме самой ссылки печатает ещё и пояснительный
         текст (см. скрипт) — вытаскиваем из вывода именно строку с vless://.
         """
-        output = await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("add_client_happ.sh"), name]
-        )
+        output = await _run_async(["sudo", "-n", self._script("add_client_happ.sh"), name])
         match = _URI_LINE.search(output)
         if match is None:
             raise XrayError("сервер не вернул ссылку vless://")
         return match.group(0)
 
     async def client_uri(self, name: str) -> str:
-        output = await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("show_client_happ.sh"), name]
-        )
+        output = await _run_async(["sudo", "-n", self._script("show_client_happ.sh"), name])
         match = _URI_LINE.search(output)
         if match is None:
             raise XrayError("сервер не вернул ссылку vless://")
         return match.group(0)
 
     async def suspend_client(self, name: str) -> None:
-        await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("suspend_client_happ.sh"), name]
-        )
+        await _run_async(["sudo", "-n", self._script("suspend_client_happ.sh"), name])
 
     async def resume_client(self, name: str) -> None:
-        await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("resume_client_happ.sh"), name]
-        )
+        await _run_async(["sudo", "-n", self._script("resume_client_happ.sh"), name])
 
     async def remove_client(self, name: str) -> None:
-        await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("remove_client_happ.sh"), name]
-        )
+        await _run_async(["sudo", "-n", self._script("remove_client_happ.sh"), name])
 
     async def traffic_by_name(self) -> dict[str, Transfer]:
         """Счётчики трафика по имени клиента (email в статистике Xray).
@@ -98,9 +95,7 @@ class Xray:
         просто не показываем цифры трафика, не роняя всё остальное (см.
         вызов в handlers.py — обёрнут в try/except XrayError).
         """
-        output = await asyncio.to_thread(
-            _run, ["sudo", "-n", self._script("xray_traffic.sh")]
-        )
+        output = await _run_async(["sudo", "-n", self._script("xray_traffic.sh")])
         try:
             data = json.loads(output)
         except json.JSONDecodeError as exc:
