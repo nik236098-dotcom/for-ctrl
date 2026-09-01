@@ -64,14 +64,10 @@ def main_menu_rows() -> list[list[InlineKeyboardButton]]:
     клавиатура снизу экрана), поэтому их же добавляем внизу каждого экрана,
     чтобы не нужно было прокручивать обратно к самому первому /start."""
     return [
-        [
-            InlineKeyboardButton(text=BTN_PROFILE, callback_data="menu:profile"),
-            InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices"),
-        ],
-        [
-            InlineKeyboardButton(text=BTN_SUBSCRIBE, callback_data="menu:subscribe"),
-            InlineKeyboardButton(text=BTN_INSTRUCTIONS, callback_data="menu:instructions"),
-        ],
+        [InlineKeyboardButton(text=BTN_PROFILE, callback_data="menu:profile")],
+        [InlineKeyboardButton(text=BTN_DEVICES, callback_data="menu:devices")],
+        [InlineKeyboardButton(text=BTN_SUBSCRIBE, callback_data="menu:subscribe")],
+        [InlineKeyboardButton(text=BTN_INSTRUCTIONS, callback_data="menu:instructions")],
     ]
 
 
