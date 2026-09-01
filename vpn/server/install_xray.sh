@@ -98,6 +98,17 @@ echo "[]" > "$CLIENTS_DB"
 cat > "${XRAY_DIR}/config.json" <<EOF
 {
   "log": { "loglevel": "warning" },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["StatsService"]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": { "statsUserUplink": true, "statsUserDownlink": true }
+    }
+  },
   "inbounds": [
     {
       "listen": "0.0.0.0",
