@@ -1,6 +1,6 @@
 [package]
 name = "ruvpn-windows"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Ru VPN — клиент WireGuard для Windows, тот же дизайн, что в Android-приложении"
 
@@ -32,3 +32,4 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsA
 # /installtunnelservice) — это требует прав администратора, поэтому всё
 # приложение целиком просит их через манифест (windows/app.manifest),
 # один раз, при запуске.
+

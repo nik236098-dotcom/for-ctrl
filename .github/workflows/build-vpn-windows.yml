@@ -17,6 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Проверка сетевых сбоев Windows-клиента
+        run: node --test vpn/windows/tests/connection-health.test.cjs
+
+      - name: Проверка статуса подписки и ключа
+        run: python -m unittest discover -s vpn/bot/tests -p "test_*.py"
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -25,6 +31,10 @@ jobs:
 
       - name: Установка tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Проверка ответов сервера ключей
+        working-directory: vpn/windows/src-tauri
+        run: cargo test
 
       # Адрес сервера ключей: приложение меняет на него короткий ключ
       # (8 символов) на настоящий конфиг тунеля при вставке — тот же секрет,
@@ -60,3 +70,4 @@ jobs:
           прогресс-баром, без кликов) — дальше используется только это
           приложение. Требует прав администратора (запрашиваются один раз
           при запуске) — управляет системным сервисом тунеля."
+

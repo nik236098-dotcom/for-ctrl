@@ -31,6 +31,13 @@ let busy = false;
 // Тестовый ключ (test1590): только анимация кнопки, без настоящего тунеля.
 let demoUp = false;
 let toastTimer = null;
+let connectionGeneration = 0;
+let revokedKeyStreak = 0;
+let watchingConnection = false;
+
+function checkIsCurrent(generation) {
+  return !busy && generation === connectionGeneration;
+}
 
 function toast(text, persistent = false) {
   // Ошибки держим намного дольше (и по клику можно закрыть раньше) —
@@ -123,6 +130,11 @@ async function render(up) {
 }
 
 function setBusy(value) {
+  if (value) {
+    // Ответ старой проверки не должен отключить новое соединение/ключ.
+    connectionGeneration++;
+    revokedKeyStreak = 0;
+  }
   busy = value;
   el.toggle.disabled = value;
   el.connectingRing.hidden = !value;
@@ -145,62 +157,70 @@ async function refreshStatus() {
   return status.up;
 }
 
-async function checkIp() {
+async function checkIp(generation = connectionGeneration) {
   try {
     const result = await invoke("check_ip");
+    if (!checkIsCurrent(generation)) return false;
     el.ip.textContent = `Ваш ip: ${result.ip}`;
     el.ipFlag.innerHTML = flagSvg(result.country_code);
     return true;
   } catch {
+    if (!checkIsCurrent(generation)) return false;
     el.ip.textContent = "Ваш ip: недоступно";
     el.ipFlag.innerHTML = "";
     return false;
   }
 }
 
-// --- честный статус, если ключ сняли на сервере (истёк срок, /drop и т.п.) --
-//
-// Служба тунеля в Windows остаётся RUNNING даже после того, как пира сняли
-// с сервера — это два независимых состояния: локальная служба ничего не
-// знает про сервер. Раньше приложение в этом случае продолжало писать "Впн
-// включен", хотя реального интернета через тунель уже не было ни капли
-// (AllowedIPs = 0.0.0.0/0 — весь трафик уходит в мёртвый тунель, включая и
-// нашу же проверку айпи). Два подряд неудачных обращения (не одно — чтобы
-// не сработать на случайный сетевой сбой) считаем настоящей причиной:
-// тунель поднят локально, а ключ на сервере больше не работает.
-let ipFailureStreak = 0;
-let watchingKey = false;
-
-async function watchKeyStillWorks() {
-  if (busy || watchingKey || (await invoke("is_demo"))) return;
-  const status = await invoke("tunnel_status");
-  if (!status.up) {
-    ipFailureStreak = 0;
-    return;
-  }
-  watchingKey = true;
-  const ok = await checkIp();
-  watchingKey = false;
-  if (ok) {
-    ipFailureStreak = 0;
-    return;
-  }
-  ipFailureStreak++;
-  if (ipFailureStreak >= 2) {
-    ipFailureStreak = 0;
-    await handleDeadKey();
+// IP-сервис показывает адрес, но ничего не знает о действительности ключа.
+// Отключение разрешено только после двух явных ответов собственного сервера
+// ключей. Таймаут, ошибка DNS, HTTP 404 старого сервера и HTTP 5xx — unknown.
+async function watchConnection() {
+  if (busy || watchingConnection) return;
+  watchingConnection = true;
+  const generation = connectionGeneration;
+  try {
+    if (await invoke("is_demo")) return;
+    const status = await invoke("tunnel_status");
+    if (!checkIsCurrent(generation)) return;
+    if (!status.up) {
+      revokedKeyStreak = 0;
+      return;
+    }
+    const [, keyResult] = await Promise.allSettled([
+      checkIp(generation),
+      invoke("key_status"),
+    ]);
+    if (!checkIsCurrent(generation)) return;
+    const state = keyResult.status === "fulfilled" ? keyResult.value : "unknown";
+    if (state !== "revoked") {
+      revokedKeyStreak = 0;
+      return;
+    }
+    revokedKeyStreak++;
+    if (revokedKeyStreak >= 2) await handleRevokedKey(generation);
+  } catch {
+    // Ошибка опроса/IPC не является отзывом ключа. Следующий тик повторит.
+    if (checkIsCurrent(generation)) revokedKeyStreak = 0;
+  } finally {
+    watchingConnection = false;
   }
 }
 
-async function handleDeadKey() {
-  toast("Впн не работает — этот ключ больше не действует. Вставьте новый (его выдаёт бот).", true);
+async function handleRevokedKey(generation) {
+  if (!checkIsCurrent(generation)) return;
+  setBusy(true);
   try {
     await invoke("disconnect");
-  } catch {
-    // не страшно — ниже refreshStatus всё равно приведёт статус в порядок
+    toast("Сервер подтвердил: доступ по ключу отключён. Проверьте подписку или получите ключ в боте.", true);
+  } catch (err) {
+    toast(`Ключ отключён на сервере. Не удалось остановить туннель: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
   }
   const up = await refreshStatus();
   await render(up);
+  checkIp();
 }
 
 async function toggleDemo() {
@@ -252,13 +272,7 @@ async function connectReal() {
   // проверки), а не настоящей ошибкой.
   const up = await refreshStatus();
   await render(up);
-  // watchKeyStillWorks() вместо простого checkIp(): если ключ мёртв уже в
-  // момент подключения (не только "стал мёртвым посреди сессии"), раньше
-  // это ловилось только фоновым 15-секундным опросом, который тикает от
-  // момента запуска приложения, а не от момента подключения — реальный
-  // случай мог остаться незамеченным почти минуту. Теперь первая проверка
-  // идёт сразу же, тем же путём, что и фоновая.
-  watchKeyStillWorks();
+  watchConnection();
 }
 
 async function disconnectReal() {
@@ -289,6 +303,7 @@ async function onToggleClicked() {
 }
 
 async function openKeyDialog() {
+  if (busy) return;
   const clip = await invoke("clipboard_text");
   el.input.value = clip && (await invoke("looks_like_key", { text: clip })) ? clip.trim() : "";
   el.overlay.hidden = false;
@@ -300,33 +315,34 @@ function closeKeyDialog() {
 }
 
 async function saveKey() {
+  if (busy) return;
   const text = el.input.value;
   if (!text || !text.trim()) {
     closeKeyDialog();
     return;
   }
-  if (await invoke("is_demo_key", { text })) {
-    await invoke("save_demo");
-    toast("Ключ сохранён");
-    closeKeyDialog();
-    await render(false);
-    return;
-  }
+  setBusy(true);
   try {
-    const resolved = await invoke("resolve_key", { text });
-    await invoke("save_key", { text: resolved.text, code: resolved.code });
+    if (await invoke("is_demo_key", { text })) {
+      await invoke("save_demo");
+    } else {
+      const resolved = await invoke("resolve_key", { text });
+      await invoke("save_key", { text: resolved.text, code: resolved.code });
+    }
     toast("Ключ сохранён");
     closeKeyDialog();
-    const up = await refreshStatus();
-    await render(up);
   } catch (err) {
     toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ из бота целиком и проверьте интернет.`, true);
+  } finally {
+    setBusy(false);
   }
+  await refreshStatus();
 }
 
 // --- смена сервера (страны) ------------------------------------------------
 
 async function openCountryDialog() {
+  if (busy) return;
   if (!(await invoke("has_switchable_code"))) {
     toast("Смена сервера доступна только для ключа, который выдал бот");
     return;
@@ -345,12 +361,14 @@ async function highlightCountry(selected) {
 }
 
 async function chooseCountry(country) {
-  if ((await invoke("current_country")) === country) {
-    closeCountryDialog();
-    return;
-  }
-  const wasUp = (await invoke("tunnel_status")).up;
+  if (busy) return;
+  setBusy(true);
   try {
+    if ((await invoke("current_country")) === country) {
+      closeCountryDialog();
+      return;
+    }
+    const wasUp = (await invoke("tunnel_status")).up;
     const changed = await invoke("switch_country", { country });
     if (!changed) {
       toast("Смена сервера доступна только для ключа, который выдал бот");
@@ -362,6 +380,9 @@ async function chooseCountry(country) {
     if (wasUp) await reconnectWithSavedKey();
   } catch (err) {
     toast(`Не получилось сменить сервер: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+    await refreshStatus();
   }
 }
 
@@ -383,9 +404,7 @@ async function reconnectWithSavedKey() {
   setBusy(false);
   const up = await refreshStatus();
   await render(up);
-  // Тот же довод, что и в connectReal(): проверяем сразу же тем же путём,
-  // что и фоновый опрос, а не ждём его следующего тика.
-  watchKeyStillWorks();
+  watchConnection();
 }
 
 el.ipRow.addEventListener("click", openCountryDialog);
@@ -407,9 +426,7 @@ el.pasteButton.addEventListener("click", async () => {
   await render(up);
   checkIp();
   setInterval(refreshStatus, 2000);
-  // 8, а не 15 секунд: connectReal()/reconnectWithSavedKey() уже делают
-  // первую проверку сразу при подключении — этот тик нужен только чтобы
-  // как можно быстрее набрать вторую (подтверждающую) неудачу подряд, не
-  // заставляя ждать почти минуту, если ключ оказался мёртвым сразу.
-  setInterval(watchKeyStillWorks, 8000);
+  // IP и доступ по ключу проверяются независимо; частый опрос не нужен.
+  setInterval(watchConnection, 30000);
 })();
+

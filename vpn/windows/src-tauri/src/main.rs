@@ -138,6 +138,51 @@ fn has_switchable_code(app: tauri::AppHandle) -> bool {
     read_meta(&app).and_then(|meta| meta.code).is_some()
 }
 
+/// Сетевые ошибки и старый сервер без /status не означают отзыв ключа.
+/// Проверка ничего не меняет в сохранённом конфиге или на сервере.
+#[tauri::command]
+async fn key_status(app: tauri::AppHandle) -> &'static str {
+    let meta = match read_meta(&app) {
+        Some(meta) => meta,
+        None => return "unmanaged",
+    };
+    let code = match meta.code {
+        Some(code) if is_short_code(&code) => code,
+        _ => return "unmanaged",
+    };
+    let base = key_server_url().trim_end_matches('/');
+    if base.is_empty() {
+        return "unknown";
+    }
+    let response = match reqwest::Client::new()
+        .get(format!("{base}/key/{code}/status"))
+        .query(&[("country", meta.country.as_str())])
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return "unknown",
+    };
+    let status = response.status().as_u16();
+    let body = match response.json::<serde_json::Value>().await {
+        Ok(body) => body,
+        Err(_) => return "unknown",
+    };
+    key_response_status(status, &body)
+}
+
+fn key_response_status(status: u16, body: &serde_json::Value) -> &'static str {
+    if status != 200 {
+        return "unknown";
+    }
+    match body.get("status").and_then(|value| value.as_str()) {
+        Some("active") => "active",
+        Some("revoked") => "revoked",
+        _ => "unknown",
+    }
+}
+
 /// Меняет сервер (страну) для уже сохранённого ключа: тот же самый код,
 /// что уже ввели, просто переспрашивается у сервера ключей с другой
 /// страной. Возвращает false, если у сохранённого ключа нет кода — тогда
@@ -633,9 +678,16 @@ async fn check_ip() -> Result<IpResult, String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
     let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let ip = json.get("ip").and_then(|value| value.as_str())
+        .filter(|value| value.parse::<std::net::IpAddr>().is_ok())
+        .ok_or_else(|| "сервис не вернул IP-адрес".to_string())?;
+    if json.get("success").and_then(|value| value.as_bool()) == Some(false) {
+        return Err("сервис проверки IP недоступен".to_string());
+    }
     Ok(IpResult {
-        ip: json.get("ip").and_then(|v| v.as_str()).unwrap_or("—").to_string(),
+        ip: ip.to_string(),
         country_code: json
             .get("country_code")
             .and_then(|v| v.as_str())
@@ -656,6 +708,7 @@ fn main() {
             resolve_key,
             current_country,
             has_switchable_code,
+            key_status,
             switch_country,
             wireguard_installed,
             install_wireguard,
@@ -668,3 +721,22 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("ошибка запуска Ru VPN");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::key_response_status;
+    use serde_json::json;
+
+    #[test]
+    fn only_explicit_successful_revocation_is_actionable() {
+        assert_eq!(key_response_status(200, &json!({"status": "revoked"})), "revoked");
+        assert_eq!(key_response_status(200, &json!({"status": "active"})), "active");
+        for status in [401, 403, 404, 429, 500, 502, 503] {
+            assert_eq!(key_response_status(status, &json!({"status": "revoked"})), "unknown");
+        }
+        for body in [json!({}), json!({"error": "revoked"}), json!({"status": "unknown"}), json!(null)] {
+            assert_eq!(key_response_status(200, &body), "unknown");
+        }
+    }
+}
+
