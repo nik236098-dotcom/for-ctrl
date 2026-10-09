@@ -185,6 +185,34 @@ test("manual disconnect remains available", async () => {
   assert.equal(a.state.connected, false);
 });
 
+test("corrupt saved configuration opens key replacement even if clipboard is inaccessible", async () => {
+  const a = await app({ connected: false, hooks: {
+    connect: () => { throw "Неверная конфигурация VPN: повреждён ключ"; },
+    clipboard_text: () => { throw new Error("Access denied"); },
+  } });
+  a.element("overlay").hidden = true;
+  await a.context.onToggleClicked();
+  assert.equal(a.element("overlay").hidden, false);
+  assert.equal(a.element("buttonToggle").disabled, false);
+  assert.equal(a.state.connected, false);
+  assert.match(a.element("toast").textContent, /Неверная конфигурация/);
+});
+
+test("invalid pasted input cannot replace the existing saved key", async () => {
+  let writes = 0;
+  const a = await app({ hooks: {
+    resolve_key: () => { throw "Неверная конфигурация VPN: ошибка формата"; },
+    save_key: () => { writes++; },
+  } });
+  a.element("inputKey").value = "s";
+  a.element("overlay").hidden = false;
+  await a.context.saveKey();
+  assert.equal(writes, 0);
+  assert.equal(a.element("overlay").hidden, false);
+  assert.equal(a.state.disconnects, 0);
+  assert.match(a.element("toast").textContent, /Неверная конфигурация/);
+});
+
 test("an existing running tunnel is stopped by the toggle, never installed twice", async () => {
   const a = await app();
   await a.context.onToggleClicked();

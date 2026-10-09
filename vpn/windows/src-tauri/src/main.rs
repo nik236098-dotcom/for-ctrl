@@ -13,6 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 use tauri::Manager;
 
+mod config;
 mod service;
 use service::State as ServiceState;
 
@@ -120,7 +121,7 @@ fn load_key(app: tauri::AppHandle) -> Option<String> {
 #[tauri::command]
 fn save_key(app: tauri::AppHandle, text: String, code: Option<String>) -> Result<(), String> {
     let path = key_file(&app)?;
-    fs::write(path, text.trim()).map_err(|e| e.to_string())?;
+    config::write_validated(&path, &text)?;
     write_meta(&app, code.as_deref(), DEFAULT_COUNTRY)
 }
 
@@ -215,13 +216,8 @@ async fn switch_country(app: tauri::AppHandle, country: String) -> Result<bool, 
         return Ok(true);
     }
     let text = fetch_config(&code, &country).await?;
-    // Проверку, что это действительно рабочий конфиг тунеля, здесь не
-    // делаем (в отличие от Android с её встроенным парсером WireGuard) —
-    // сервер ключей и так отдаёт уже готовый конфиг; настоящая проверка
-    // произойдёт при попытке подключиться (connect() отдаст ошибку от
-    // самого wireguard.exe, если там что-то не так).
     let key_path = key_file(&app)?;
-    fs::write(key_path, text.trim()).map_err(|e| e.to_string())?;
+    config::write_validated(&key_path, &text)?;
     write_meta(&app, Some(&code), &country)?;
     Ok(true)
 }
@@ -273,7 +269,8 @@ async fn fetch_config(code: &str, country: &str) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("сервер ответил {}", response.status()));
     }
-    response.text().await.map_err(|e| e.to_string())
+    let text = response.text().await.map_err(|e| e.to_string())?;
+    config::validate(&text)
 }
 
 /// Старый формат ключа: весь конфиг, упакованный в base64 прямо в строке.
@@ -312,7 +309,7 @@ async fn resolve_key(text: String) -> Result<ResolvedKey, String> {
             let config = fetch_config(&value, DEFAULT_COUNTRY).await?;
             Ok(ResolvedKey { text: config, code: Some(value) })
         } else {
-            Ok(ResolvedKey { text: value, code: None })
+            Ok(ResolvedKey { text: config::validate(&value)?, code: None })
         };
     }
     let payload = value[PREFIX.len()..].trim().to_string();
@@ -320,7 +317,7 @@ async fn resolve_key(text: String) -> Result<ResolvedKey, String> {
         let config = fetch_config(&payload, DEFAULT_COUNTRY).await?;
         Ok(ResolvedKey { text: config, code: Some(payload) })
     } else {
-        Ok(ResolvedKey { text: decode_legacy(&payload)?, code: None })
+        Ok(ResolvedKey { text: config::validate(&decode_legacy(&payload)?)?, code: None })
     }
 }
 
@@ -493,6 +490,8 @@ async fn close_wireguard_manager_window() {
 async fn connect(config_text: String) -> Result<(), String> {
     let _operation = TUNNEL_OPERATION.try_lock()
         .map_err(|_| "Подключение уже меняется. Дождитесь завершения операции.".to_string())?;
+    // Catch corrupt saved data before launching WireGuard or changing its file.
+    let config_text = config::validate(&config_text)?;
     let service_name = format!("WireGuardTunnel${TUNNEL_NAME}");
     // A running tunnel is already connected. A pending stop/start must settle
     // before installation; errors querying SCM must never mean "not installed".
@@ -513,7 +512,7 @@ async fn connect(config_text: String) -> Result<(), String> {
 
     let conf_path = tunnel_conf_path();
     fs::create_dir_all(conf_path.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&conf_path, &config_text).map_err(|e| e.to_string())?;
+    config::write_validated(&conf_path, &config_text)?;
 
     let mut installed = install_tunnel_service(&conf_path).await;
     // The installer may lose a race to another process. Only SCM can confirm
@@ -552,10 +551,10 @@ async fn wait_for_service_running(name: &str, timeout: Duration) -> Result<(), S
             return Ok(());
         }
         if status.state == ServiceState::Stopped && status.exit_code != 0 {
-            return Err(format!("Служба WireGuard остановилась с кодом Windows {}", status.exit_code));
+            return Err(status.failure_message());
         }
         if std::time::Instant::now() >= deadline {
-            return Err(format!("Служба WireGuard не запустилась вовремя ({}; код {})", status.state.label(), status.exit_code));
+            return Err(format!("Служба WireGuard не запустилась вовремя ({}; Windows {}; WireGuard {})", status.state.label(), status.exit_code, status.service_exit_code));
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -754,6 +753,22 @@ fn main() {
 mod tests {
     use super::key_response_status;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn invalid_raw_and_legacy_inputs_are_rejected_before_saving() {
+        use base64::Engine;
+        for input in ["s".to_string(), "<html>upstream unavailable</html>".to_string(),
+            format!("ruvpn://{}", base64::engine::general_purpose::STANDARD.encode("not a wireguard configuration"))] {
+            let error = super::resolve_key(input).await.err().expect("invalid input must be rejected");
+            assert!(error.starts_with("Неверная конфигурация VPN:"));
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_saved_config_is_rejected_before_querying_scm_or_starting_wireguard() {
+        let error = super::connect("s".to_string()).await.unwrap_err();
+        assert!(error.starts_with("Неверная конфигурация VPN:"));
+    }
 
     #[test]
     fn only_explicit_successful_revocation_is_actionable() {

@@ -279,11 +279,12 @@ async function connectReal() {
     }
     await invoke("connect", { configText: key });
   } catch (err) {
+    missingKey = messageOf(err).startsWith("Неверная конфигурация VPN:") || messageOf(err).includes("(1066/2)");
     toast(`Не удалось соединиться: ${messageOf(err)}`, true);
   } finally {
     setBusy(false);
     await refreshStatus();
-    if (missingKey) openKeyDialog();
+    if (missingKey) await openKeyDialog();
   }
   watchConnection();
 }
@@ -328,8 +329,13 @@ async function onToggleClicked() {
 
 async function openKeyDialog() {
   if (busy) return;
-  const clip = await invoke("clipboard_text");
-  el.input.value = clip && (await invoke("looks_like_key", { text: clip })) ? clip.trim() : "";
+  el.input.value = "";
+  try {
+    const clip = await invoke("clipboard_text");
+    el.input.value = clip && (await invoke("looks_like_key", { text: clip })) ? clip.trim() : "";
+  } catch (_) {
+    // A busy clipboard must not prevent replacing a damaged saved key.
+  }
   el.overlay.hidden = false;
   el.input.focus();
 }

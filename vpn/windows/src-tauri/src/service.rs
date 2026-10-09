@@ -42,6 +42,21 @@ impl State {
 pub struct Snapshot {
     pub state: State,
     pub exit_code: u32,
+    pub service_exit_code: u32,
+}
+
+impl Snapshot {
+    pub fn failure_message(&self) -> String {
+        if self.exit_code == 1066 {
+            // WireGuard Windows services/errors.go: ErrorLoadConfiguration = 2.
+            if self.service_exit_code == 2 {
+                return "WireGuard не смог прочитать конфигурацию (1066/2). Заново вставьте полный ключ из бота.".to_string();
+            }
+            format!("Служба WireGuard остановилась: код Windows 1066, код WireGuard {}", self.service_exit_code)
+        } else {
+            format!("Служба WireGuard остановилась с кодом Windows {}", self.exit_code)
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -67,17 +82,18 @@ pub fn query(name: &str) -> Result<Snapshot, String> {
         let service = match OpenServiceW(manager.0, PCWSTR(name.as_ptr()), SERVICE_QUERY_STATUS) {
             Ok(handle) => Handle(handle),
             Err(e) if e.code() == HRESULT::from_win32(ERROR_SERVICE_DOES_NOT_EXIST.0) => {
-                return Ok(Snapshot { state: State::Missing, exit_code: 0 });
+                return Ok(Snapshot { state: State::Missing, exit_code: 0, service_exit_code: 0 });
             }
             Err(e) if e.code() == HRESULT::from_win32(ERROR_SERVICE_MARKED_FOR_DELETE.0) => {
-                return Ok(Snapshot { state: State::Deleting, exit_code: 0 });
+                return Ok(Snapshot { state: State::Deleting, exit_code: 0, service_exit_code: 0 });
             }
             Err(e) => return Err(format!("Не удалось проверить службу WireGuard: {e}")),
         };
         let mut status = SERVICE_STATUS::default();
         QueryServiceStatus(service.0, &mut status)
             .map_err(|e| format!("Не удалось прочитать состояние WireGuard: {e}"))?;
-        Ok(Snapshot { state: State::from_raw(status.dwCurrentState.0), exit_code: status.dwWin32ExitCode })
+        Ok(Snapshot { state: State::from_raw(status.dwCurrentState.0), exit_code: status.dwWin32ExitCode,
+            service_exit_code: status.dwServiceSpecificExitCode })
     }
 }
 
@@ -89,6 +105,16 @@ pub fn query(_name: &str) -> Result<Snapshot, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_specific_failure_keeps_the_actual_cause() {
+        let status = Snapshot { state: State::Stopped, exit_code: 1066, service_exit_code: 2 };
+        assert!(status.failure_message().contains("конфигурацию (1066/2)"));
+        let other = Snapshot { service_exit_code: 3, ..status };
+        assert!(other.failure_message().contains("код WireGuard 3"));
+        let win32 = Snapshot { exit_code: 5, ..status };
+        assert!(!win32.failure_message().contains("1066/2"));
+    }
 
     #[test]
     fn numeric_states_do_not_depend_on_windows_language() {
