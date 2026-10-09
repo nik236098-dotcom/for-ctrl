@@ -34,6 +34,8 @@ let toastTimer = null;
 let connectionGeneration = 0;
 let revokedKeyStreak = 0;
 let watchingConnection = false;
+let togglePending = false;
+let statusRefresh = null;
 
 function checkIsCurrent(generation) {
   return !busy && generation === connectionGeneration;
@@ -136,7 +138,7 @@ function setBusy(value) {
     revokedKeyStreak = 0;
   }
   busy = value;
-  el.toggle.disabled = value;
+  el.toggle.disabled = value || togglePending;
   el.connectingRing.hidden = !value;
   el.powerOff.classList.toggle("connecting", value);
   if (value) {
@@ -146,15 +148,39 @@ function setBusy(value) {
 }
 
 async function refreshStatus() {
-  const status = await invoke("tunnel_status");
-  if (!busy) await render(status.up);
-  if (status.up) {
-    el.received.textContent = formatBytes(status.rx);
-    el.sent.textContent = formatBytes(status.tx);
-    el.received.classList.add("up");
-    el.sent.classList.add("up");
-  }
-  return status.up;
+  // Only one poll in flight. A failed query is unknown, never "VPN off".
+  if (statusRefresh) return statusRefresh;
+  const generation = connectionGeneration;
+  statusRefresh = (async () => {
+    try {
+      const status = await invoke("tunnel_status");
+      if (generation !== connectionGeneration || busy) return status.up;
+      await render(status.up);
+      if (generation !== connectionGeneration || busy) return status.up;
+      el.connectingRing.hidden = !status.transitioning;
+      if (status.transitioning) {
+        el.status.textContent = status.state === "starting" ? "Туннель запускается…" : "Туннель останавливается…";
+        el.toggle.setAttribute("aria-label", "Остановить туннель");
+      }
+      if (status.up) {
+        el.received.textContent = formatBytes(status.rx);
+        el.sent.textContent = formatBytes(status.tx);
+        el.received.classList.add("up");
+        el.sent.classList.add("up");
+      }
+      return status.up;
+    } catch {
+      if (generation === connectionGeneration && !busy) {
+        el.status.textContent = "Не удалось проверить состояние VPN";
+        el.status.classList.remove("up");
+        el.connectingRing.hidden = true;
+      }
+      return null;
+    } finally {
+      statusRefresh = null;
+    }
+  })();
+  return statusRefresh;
 }
 
 async function checkIp(generation = connectionGeneration) {
@@ -218,8 +244,7 @@ async function handleRevokedKey(generation) {
   } finally {
     setBusy(false);
   }
-  const up = await refreshStatus();
-  await render(up);
+  await refreshStatus();
   checkIp();
 }
 
@@ -238,40 +263,28 @@ async function toggleDemo() {
 }
 
 async function connectReal() {
-  const key = await invoke("load_key");
-  if (!key) {
-    toast("Сначала вставьте ключ — его выдаёт бот");
-    openKeyDialog();
-    return;
-  }
-  const needsInstall = !(await invoke("wireguard_installed"));
-  if (needsInstall) {
-    // Обычно это происходит совсем незаметно (тихий msiexec), но на
-    // случай отката на видимый установщик — предупреждаем заранее, а не
-    // притворяемся, что окно точно не появится.
-    toast("Настраиваем WireGuard — если появится окно установки, нажмите «Установить», это один раз");
-  }
   setBusy(true);
-  if (needsInstall) {
-    // Отдельная подпись поверх общего "Наводим связь…" — чтобы было видно,
-    // на каком именно шаге зависло, если что-то пойдёт не так.
-    el.status.textContent = "Ставим WireGuard…";
-  }
-  let connectError = null;
+  let missingKey = false;
   try {
+    const key = await invoke("load_key");
+    if (!key) {
+      missingKey = true;
+      toast("Сначала вставьте ключ — его выдаёт бот");
+      return;
+    }
+    const needsInstall = !(await invoke("wireguard_installed"));
+    if (needsInstall) {
+      el.status.textContent = "Ставим WireGuard…";
+      toast("Настраиваем WireGuard — если появится окно установки, нажмите «Установить», это один раз");
+    }
     await invoke("connect", { configText: key });
   } catch (err) {
-    connectError = messageOf(err);
-    toast(`Не удалось соединиться: ${connectError}`, true);
+    toast(`Не удалось соединиться: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+    await refreshStatus();
+    if (missingKey) openKeyDialog();
   }
-  setBusy(false);
-  // connect() на стороне Rust теперь сам ждёт, пока служба тунеля реально
-  // не станет RUNNING, и только тогда отдаёт успех — поэтому отдельно
-  // проверять здесь "а вдруг тихо не поднялся" больше не нужно: это было
-  // ложным срабатыванием (служба ещё не успевала стартовать к моменту
-  // проверки), а не настоящей ошибкой.
-  const up = await refreshStatus();
-  await render(up);
   watchConnection();
 }
 
@@ -281,24 +294,35 @@ async function disconnectReal() {
     await invoke("disconnect");
   } catch (err) {
     toast(`Не удалось разъединиться: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+    await refreshStatus();
   }
-  setBusy(false);
-  const up = await refreshStatus();
-  await render(up);
   checkIp();
 }
 
 async function onToggleClicked() {
-  if (busy) return;
-  if (await invoke("is_demo")) {
-    await toggleDemo();
-    return;
-  }
-  const status = await invoke("tunnel_status");
-  if (status.up) {
-    await disconnectReal();
-  } else {
-    await connectReal();
+  // Acquire before the first await so a double click cannot issue two installs.
+  if (busy || togglePending) return;
+  togglePending = true;
+  el.toggle.disabled = true;
+  try {
+    if (await invoke("is_demo")) {
+      await toggleDemo();
+      return;
+    }
+    const status = await invoke("tunnel_status");
+    if (status.up || status.transitioning) {
+      await disconnectReal();
+    } else {
+      await connectReal();
+    }
+  } catch (err) {
+    toast(`Не удалось проверить VPN: ${messageOf(err)}`, true);
+    await refreshStatus();
+  } finally {
+    togglePending = false;
+    el.toggle.disabled = busy;
   }
 }
 
@@ -315,7 +339,7 @@ function closeKeyDialog() {
 }
 
 async function saveKey() {
-  if (busy) return;
+  if (busy || togglePending) return;
   const text = el.input.value;
   if (!text || !text.trim()) {
     closeKeyDialog();
@@ -361,7 +385,7 @@ async function highlightCountry(selected) {
 }
 
 async function chooseCountry(country) {
-  if (busy) return;
+  if (busy || togglePending) return;
   setBusy(true);
   try {
     if ((await invoke("current_country")) === country) {
@@ -389,21 +413,16 @@ async function chooseCountry(country) {
 async function reconnectWithSavedKey() {
   setBusy(true);
   try {
+    // Do not start a new install if stopping the previous tunnel failed.
     await invoke("disconnect");
-  } catch {
-    // тунеля могло уже не быть — не страшно, ниже всё равно поднимаем заново
+    const key = await invoke("load_key");
+    if (key) await invoke("connect", { configText: key });
+  } catch (err) {
+    toast(`Не удалось переподключиться: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+    await refreshStatus();
   }
-  const key = await invoke("load_key");
-  if (key) {
-    try {
-      await invoke("connect", { configText: key });
-    } catch (err) {
-      toast(`Не удалось соединиться: ${messageOf(err)}`, true);
-    }
-  }
-  setBusy(false);
-  const up = await refreshStatus();
-  await render(up);
   watchConnection();
 }
 
@@ -422,8 +441,7 @@ el.pasteButton.addEventListener("click", async () => {
 });
 
 (async () => {
-  const up = await refreshStatus();
-  await render(up);
+  await refreshStatus();
   checkIp();
   setInterval(refreshStatus, 2000);
   // IP и доступ по ключу проверяются независимо; частый опрос не нужен.

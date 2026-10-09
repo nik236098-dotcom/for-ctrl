@@ -1,6 +1,6 @@
 [package]
 name = "ruvpn-windows"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Ru VPN — клиент WireGuard для Windows, тот же дизайн, что в Android-приложении"
 
@@ -8,13 +8,14 @@ description = "Ru VPN — клиент WireGuard для Windows, тот же д�
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tauri-plugin-single-instance = "2"
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # rustls вместо системного OpenSSL — меньше сюрпризов при сборке на чистом
 # windows-latest runner в CI.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-tokio = { version = "1", features = ["rt-multi-thread", "time", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "process", "sync"] }
 base64 = "0.22"
 # Чтение буфера обмена для кнопки «Вставить из буфера» и автоподстановки —
 # то же самое, что ClipboardManager на Android.
@@ -26,7 +27,7 @@ arboard = "3"
 # крейта дополнительно требуют feature Win32_NetworkManagement_Ndis — без
 # неё эти два имени физически не собраны в крейт (не просто "не включены",
 # а "configured out", видно в исходниках windows-rs).
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_Services", "Win32_UI_WindowsAndMessaging", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis"] }
 
 # Приложение управляет системным сервисом туннеля (wireguard.exe
 # /installtunnelservice) — это требует прав администратора, поэтому всё

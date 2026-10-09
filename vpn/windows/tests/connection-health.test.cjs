@@ -15,7 +15,7 @@ function deferred() {
 async function app(overrides = {}) {
   const state = {
     connected: true, demo: false, ipFails: false, keyStatus: "active",
-    disconnects: 0, keyCalls: 0, country: "ru", hooks: {}, ...overrides,
+    disconnects: 0, connects: 0, keyCalls: 0, country: "ru", hooks: {}, ...overrides,
   };
   const elements = new Map();
   const element = (id) => {
@@ -39,7 +39,7 @@ async function app(overrides = {}) {
         if (state.keyStatus instanceof Error) throw state.keyStatus;
         return state.keyStatus;
       case "disconnect": state.disconnects++; state.connected = false; return;
-      case "connect": state.connected = true; return;
+      case "connect": state.connects++; state.connected = true; return;
       case "load_key": return "test config";
       case "has_switchable_code": case "wireguard_installed": return true;
       case "current_country": return state.country;
@@ -183,4 +183,72 @@ test("manual disconnect remains available", async () => {
   await a.context.disconnectReal();
   assert.equal(a.state.disconnects, 1);
   assert.equal(a.state.connected, false);
+});
+
+test("an existing running tunnel is stopped by the toggle, never installed twice", async () => {
+  const a = await app();
+  await a.context.onToggleClicked();
+  assert.equal(a.state.connects, 0);
+  assert.equal(a.state.disconnects, 1);
+  assert.equal(a.element("buttonToggle").disabled, false);
+});
+
+test("double click while status query is pending starts one connection", async () => {
+  const a = await app({ connected: false });
+  const status = deferred();
+  a.state.hooks.tunnel_status = () => status.promise;
+  const first = a.context.onToggleClicked();
+  await a.context.onToggleClicked();
+  delete a.state.hooks.tunnel_status;
+  status.resolve({ up: false });
+  await first;
+  assert.equal(a.state.connects, 1);
+  assert.equal(a.state.disconnects, 0);
+});
+
+test("failed service query never triggers blind installation", async () => {
+  const a = await app();
+  a.state.hooks.tunnel_status = () => { throw new Error("Access denied"); };
+  await a.context.onToggleClicked();
+  assert.equal(a.state.connects, 0);
+  assert.equal(a.state.disconnects, 0);
+  assert.equal(a.element("buttonToggle").disabled, false);
+  assert.equal(a.element("connectingRing").hidden, true);
+  assert.match(a.element("textStatus").textContent, /Не удалось проверить/);
+});
+
+test("install error and failed status refresh always release busy state", async () => {
+  const a = await app({ connected: false });
+  a.state.hooks.connect = () => { throw new Error("Tunnel already installed and running"); };
+  a.state.hooks.tunnel_status = () => { throw new Error("Query failure"); };
+  await a.context.connectReal();
+  assert.equal(a.element("buttonToggle").disabled, false);
+  assert.equal(a.element("connectingRing").hidden, true);
+  assert.doesNotMatch(a.element("textStatus").textContent, /Наводим/);
+  assert.match(a.element("toast").textContent, /already installed/);
+});
+
+test("key load failure also releases busy state", async () => {
+  const a = await app();
+  a.state.hooks.load_key = () => { throw new Error("read failed"); };
+  await a.context.connectReal();
+  assert.equal(a.element("buttonToggle").disabled, false);
+  assert.equal(a.element("connectingRing").hidden, true);
+});
+
+test("reconnect must stop after uninstall failure", async () => {
+  const a = await app();
+  a.state.hooks.disconnect = () => { throw new Error("Access denied"); };
+  await a.context.reconnectWithSavedKey();
+  assert.equal(a.state.connects, 0);
+  assert.equal(a.element("buttonToggle").disabled, false);
+  assert.match(a.element("toast").textContent, /Access denied/);
+});
+
+test("startup status error does not stop subsequent polling", async () => {
+  const a = await app({ hooks: { tunnel_status: () => { throw new Error("SCM failed"); } } });
+  assert.ok(a.intervals.some(({ ms }) => ms === 2000));
+  delete a.state.hooks.tunnel_status;
+  await a.context.refreshStatus();
+  assert.equal(a.element("textStatus").textContent, "Впн включен");
 });

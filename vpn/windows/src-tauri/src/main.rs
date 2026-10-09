@@ -13,6 +13,20 @@ use std::process::Command;
 use std::time::Duration;
 use tauri::Manager;
 
+mod service;
+use service::State as ServiceState;
+
+// No concurrent install/uninstall, including calls from background checks.
+static TUNNEL_OPERATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn command_output(command: Command, timeout: Duration) -> Result<std::process::Output, String> {
+    let mut command = tokio::process::Command::from(command);
+    command.kill_on_drop(true);
+    tokio::time::timeout(timeout, command.output()).await
+        .map_err(|_| "Команда Windows не завершилась вовремя. Попробуйте ещё раз.".to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Обычный `Command::new` из консольного приложения на Windows на долю
 /// секунды показывает мелькающее окно консоли — заметно, когда его дёргают
 /// раз в 2 секунды (опрос статуса тунеля). CREATE_NO_WINDOW убирает это
@@ -477,12 +491,17 @@ async fn close_wireguard_manager_window() {
 
 #[tauri::command]
 async fn connect(config_text: String) -> Result<(), String> {
-    // Если тунель уже поднят (например, наше приложение на секунду не
-    // успело обновить свой статус и второй клик пришёл раньше) —
-    // wireguard.exe откажет с "Tunnel already installed and running".
-    // Это не настоящая ошибка, тунель и так уже работает.
-    if service_running(&format!("WireGuardTunnel${TUNNEL_NAME}")) {
+    let _operation = TUNNEL_OPERATION.try_lock()
+        .map_err(|_| "Подключение уже меняется. Дождитесь завершения операции.".to_string())?;
+    let service_name = format!("WireGuardTunnel${TUNNEL_NAME}");
+    // A running tunnel is already connected. A pending stop/start must settle
+    // before installation; errors querying SCM must never mean "not installed".
+    let current = wait_for_stable_service(&service_name, Duration::from_secs(20)).await?;
+    if current.state == ServiceState::Running {
         return Ok(());
+    }
+    if !matches!(current.state, ServiceState::Missing | ServiceState::Stopped) {
+        return Err(format!("Необычное состояние службы WireGuard: {:?}", current.state));
     }
 
     let freshly_installed = !wireguard_installed();
@@ -490,64 +509,55 @@ async fn connect(config_text: String) -> Result<(), String> {
         install_wireguard().await?;
         #[cfg(windows)]
         close_wireguard_manager_window().await;
-        // Сразу после установки службе/драйверу WireGuard иногда нужно
-        // немного времени, чтобы "осесть" — первая попытка поднять тунель
-        // в ту же секунду не всегда проходит (не проверено на реальной
-        // Windows — это лучшая попытка объяснить жалобу "после установки
-        // ничего не работает", а не подтверждённая причина).
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
     let conf_path = tunnel_conf_path();
     fs::create_dir_all(conf_path.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&conf_path, &config_text).map_err(|e| e.to_string())?;
 
-    let mut result = install_tunnel_service(&conf_path).await;
-    if result.is_err() && freshly_installed {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        result = install_tunnel_service(&conf_path).await;
+    let mut installed = install_tunnel_service(&conf_path).await;
+    // The installer may lose a race to another process. Only SCM can confirm
+    // success; never infer it solely from the English error string.
+    let observed = wait_for_stable_service(&service_name, Duration::from_secs(20)).await?;
+    if observed.state == ServiceState::Running {
+        return Ok(());
     }
-
-    // НЕ удаляем файл здесь: /installtunnelservice возвращает успех уже
-    // после регистрации службы в SCM, а сама служба открывает файл конфига
-    // чуть позже, асинхронно — реальная причина бага "wireguard.exe
-    // отчитался об успехе, а тунель не поднялся" (см. журнал WireGuard:
-    // "Unable to load configuration from path: ...The system cannot find
-    // the file specified" — служба стартовала уже после того, как этот же
-    // код успевал удалить файл). Файл остаётся лежать (перезаписывается на
-    // каждый connect) и удаляется только в disconnect(), когда служба уже
-    // снята и файл ей больше не понадобится.
-    if result.is_ok() {
-        // По той же причине, что и с файлом конфига: /installtunnelservice
-        // возвращает успех сразу после регистрации службы в SCM, а реально
-        // она встаёт в RUNNING чуть позже. Раньше мы отдавали "успех" в
-        // интерфейс немедленно — кнопка разблокировалась и статус на долю
-        // секунды показывал "Впн выключен" (настоящий статус ещё не
-        // подтянулся), из-за чего хотелось нажать ещё раз. Теперь ждём
-        // здесь, пока служба не станет реально RUNNING (до 10 секунд), и
-        // только тогда отдаём успех — всё это время кнопка на фронтенде
-        // остаётся заблокированной с надписью "Наводим связь…".
-        let service_name = format!("WireGuardTunnel${TUNNEL_NAME}");
-        if !wait_for_service_running(&service_name, Duration::from_secs(10)).await {
-            result = Err("Служба тунеля зарегистрирована, но не запустилась вовремя".to_string());
-        }
+    if installed.is_err() && freshly_installed {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        installed = install_tunnel_service(&conf_path).await;
     }
-    result
+    installed?;
+    wait_for_service_running(&service_name, Duration::from_secs(20)).await
 }
 
-/// Ждёт, пока служба тунеля реально не перейдёт в состояние RUNNING (или не
-/// истечёт таймаут). Используется только для того, чтобы не отдавать
-/// "успех" наружу раньше, чем тунель по-настоящему поднялся.
-async fn wait_for_service_running(service_name: &str, timeout: Duration) -> bool {
+async fn wait_for_stable_service(name: &str, timeout: Duration) -> Result<service::Snapshot, String> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if service_running(service_name) {
-            return true;
+        let status = service::query(name)?;
+        if !status.state.transitioning() {
+            return Ok(status);
         }
         if std::time::Instant::now() >= deadline {
-            return false;
+            return Err(format!("Служба WireGuard не завершила переход: {}. Закройте другие окна WireGuard и повторите.", status.state.label()));
         }
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_for_service_running(name: &str, timeout: Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let status = service::query(name)?;
+        if status.state == ServiceState::Running {
+            return Ok(());
+        }
+        if status.state == ServiceState::Stopped && status.exit_code != 0 {
+            return Err(format!("Служба WireGuard остановилась с кодом Windows {}", status.exit_code));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!("Служба WireGuard не запустилась вовремя ({}; код {})", status.state.label(), status.exit_code));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 }
 
@@ -558,11 +568,9 @@ fn tunnel_conf_path() -> PathBuf {
 }
 
 async fn install_tunnel_service(conf_path: &std::path::Path) -> Result<(), String> {
-    let output = new_command(wireguard_exe())
-        .arg("/installtunnelservice")
-        .arg(conf_path)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut command = new_command(wireguard_exe());
+    command.arg("/installtunnelservice").arg(conf_path);
+    let output = command_output(command, Duration::from_secs(30)).await?;
     if !output.status.success() {
         return Err(command_error(&output.stderr, output.status.code()));
     }
@@ -571,15 +579,32 @@ async fn install_tunnel_service(conf_path: &std::path::Path) -> Result<(), Strin
 
 #[tauri::command]
 async fn disconnect() -> Result<(), String> {
-    let output = new_command(wireguard_exe())
-        .arg("/uninstalltunnelservice")
-        .arg(TUNNEL_NAME)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(command_error(&output.stderr, output.status.code()));
+    let _operation = TUNNEL_OPERATION.try_lock()
+        .map_err(|_| "Подключение уже меняется. Дождитесь завершения операции.".to_string())?;
+    let name = format!("WireGuardTunnel${TUNNEL_NAME}");
+    if service::query(&name)?.state != ServiceState::Missing {
+        let mut command = new_command(wireguard_exe());
+        command.arg("/uninstalltunnelservice").arg(TUNNEL_NAME);
+        let result = command_output(command, Duration::from_secs(30)).await;
+        if service::query(&name)?.state != ServiceState::Missing {
+            let output = result?;
+            if !output.status.success() {
+                return Err(command_error(&output.stderr, output.status.code()));
+            }
+        }
+        // Uninstall requests deletion asynchronously. Keep the config until
+        // SCM confirms removal, otherwise an immediate reconnect races deletion.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            if service::query(&name)?.state == ServiceState::Missing {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("Windows ещё не удалила службу WireGuard. Закройте окно управления службами и попробуйте снова.".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
     }
-    // Служба снята — файл конфига (см. connect()) ей больше не нужен.
     fs::remove_file(tunnel_conf_path()).ok();
     Ok(())
 }
@@ -596,26 +621,22 @@ fn command_error(stderr: &[u8], code: Option<i32>) -> String {
 #[derive(Serialize)]
 struct TunnelStatus {
     up: bool,
+    state: &'static str,
+    transitioning: bool,
     rx: u64,
     tx: u64,
 }
 
-fn service_running(service_name: &str) -> bool {
-    match new_command("sc").arg("query").arg(service_name).output() {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).contains("RUNNING"),
-        Err(_) => false,
-    }
-}
-
 #[tauri::command]
-async fn tunnel_status() -> TunnelStatus {
-    let up = service_running(&format!("WireGuardTunnel${TUNNEL_NAME}"));
+async fn tunnel_status() -> Result<TunnelStatus, String> {
+    let status = service::query(&format!("WireGuardTunnel${TUNNEL_NAME}"))?;
+    let up = status.state == ServiceState::Running;
     let (rx, tx) = if up {
         read_interface_bytes(TUNNEL_NAME).unwrap_or((0, 0))
     } else {
         (0, 0)
     };
-    TunnelStatus { up, rx, tx }
+    Ok(TunnelStatus { up, state: status.state.label(), transitioning: status.state.transitioning(), rx, tx })
 }
 
 /// Счётчики трафика — тем же способом, что и любой другой сетевой адаптер
@@ -698,6 +719,13 @@ async fn check_ip() -> Result<IpResult, String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             load_key,
             save_key,
@@ -737,6 +765,20 @@ mod tests {
         for body in [json!({}), json!({"error": "revoked"}), json!({"status": "unknown"}), json!(null)] {
             assert_eq!(key_response_status(200, &body), "unknown");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_stalled_child_command_has_a_deadline() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let mut command = super::new_command("powershell.exe");
+            command.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
+            let start = std::time::Instant::now();
+            let result = super::command_output(command, std::time::Duration::from_millis(200)).await;
+            assert!(result.is_err());
+            assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        });
     }
 }
 

@@ -32,9 +32,11 @@ jobs:
       - name: Установка tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Проверка ответов сервера ключей
+      - name: Проверка службы Windows и ответов сервера ключей
         working-directory: vpn/windows/src-tauri
-        run: cargo test
+        env:
+          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
+        run: cargo test --release
 
       # Адрес сервера ключей: приложение меняет на него короткий ключ
       # (8 символов) на настоящий конфиг тунеля при вставке — тот же секрет,
