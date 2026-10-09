@@ -754,20 +754,24 @@ mod tests {
     use super::key_response_status;
     use serde_json::json;
 
-    #[tokio::test]
-    async fn invalid_raw_and_legacy_inputs_are_rejected_before_saving() {
+    #[test]
+    fn invalid_raw_and_legacy_inputs_are_rejected_before_saving() {
         use base64::Engine;
-        for input in ["s".to_string(), "<html>upstream unavailable</html>".to_string(),
-            format!("ruvpn://{}", base64::engine::general_purpose::STANDARD.encode("not a wireguard configuration"))] {
-            let error = super::resolve_key(input).await.err().expect("invalid input must be rejected");
-            assert!(error.starts_with("Неверная конфигурация VPN:"));
-        }
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            for input in ["s".to_string(), "<html>upstream unavailable</html>".to_string(),
+                format!("ruvpn://{}", base64::engine::general_purpose::STANDARD.encode("not a wireguard configuration"))] {
+                let error = super::resolve_key(input).await.err().expect("invalid input must be rejected");
+                assert!(error.starts_with("Неверная конфигурация VPN:"));
+            }
+        });
     }
 
-    #[tokio::test]
-    async fn invalid_saved_config_is_rejected_before_querying_scm_or_starting_wireguard() {
-        let error = super::connect("s".to_string()).await.unwrap_err();
-        assert!(error.starts_with("Неверная конфигурация VPN:"));
+    #[test]
+    fn invalid_saved_config_is_rejected_before_querying_scm_or_starting_wireguard() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let error = super::connect("s".to_string()).await.unwrap_err();
+            assert!(error.starts_with("Неверная конфигурация VPN:"));
+        });
     }
 
     #[test]
