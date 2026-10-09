@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_card"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="@font/jetbrains_mono_bold"
+        android:gravity="center"
+        android:text="@string/country_dialog_title"
+        android:textColor="@color/ink"
+        android:textSize="22sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:fontFamily="@font/jetbrains_mono_regular"
+        android:gravity="center"
+        android:text="@string/country_dialog_help"
+        android:textColor="@color/ink_soft"
+        android:textSize="14sp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/buttonCountryRu"
+        style="@style/Widget.RuVPN.Button.Flat"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/country_ru" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/buttonCountryUs"
+        style="@style/Widget.RuVPN.Button.Flat"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/country_us" />
+
+    <TextView
+        android:id="@+id/textCountryCancel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:background="?attr/selectableItemBackground"
+        android:fontFamily="@font/jetbrains_mono_regular"
+        android:gravity="center"
+        android:minHeight="44dp"
+        android:text="@string/cancel"
+        android:textColor="@color/ink_soft"
+        android:textSize="16sp" />
+</LinearLayout>

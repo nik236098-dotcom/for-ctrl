@@ -1,0 +1,80 @@
+name: Сборка APK RU VPN
+
+on:
+  push:
+    paths:
+      - "vpn/android/**"
+      - ".github/workflows/build-vpn-apk.yml"
+  workflow_dispatch:
+
+# Нужно для публикации APK в релиз.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Компоненты Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      # Если в секретах репозитория лежит WG_CONFIG (содержимое клиентского
+      # .conf), он вшивается в APK — приложение подключится в одно нажатие.
+      # Без секрета собирается «пустой» APK, конфиг импортируется в самом
+      # приложении.
+      - name: Встроить конфиг из секрета
+        env:
+          WG_CONFIG: ${{ secrets.WG_CONFIG }}
+        run: |
+          if [ -n "$WG_CONFIG" ]; then
+            printf '%s' "$WG_CONFIG" > vpn/android/app/src/main/assets/wg.conf
+            echo "конфиг встроен в сборку"
+          else
+            echo "секрет WG_CONFIG не задан — собираем без встроенного конфига"
+          fi
+
+      # Адрес сервера ключей: приложение меняет на него короткий ключ
+      # (8 символов) на настоящий конфиг тунеля при вставке. Без секрета
+      # KEY_SERVER_URL вставка короткого ключа не сработает — останется
+      # только конфиг, вшитый через WG_CONFIG выше.
+      - name: Сборка debug-APK
+        working-directory: vpn/android
+        env:
+          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
+        run: gradle --no-daemon assembleDebug -PkeyServerUrl="$KEY_SERVER_URL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruvpn-debug-apk
+          path: vpn/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # Готовый APK кладём в релиз с постоянным тегом ruvpn-latest —
+      # оттуда его можно скачать по прямой ссылке, в том числе с телефона.
+      - name: Публикация APK в релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp vpn/android/app/build/outputs/apk/debug/app-debug.apk ruvpn-debug.apk
+          gh release delete ruvpn-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ruvpn-latest ruvpn-debug.apk \
+            --target "$GITHUB_SHA" \
+            --title "RU VPN — debug APK" \
+            --notes "Клиент WireGuard для Android, собран из коммита $GITHUB_SHA.
+
+          Конфиг внутрь не вшит: после установки импортируйте .conf,
+          который выдаёт vpn/server/add_client.sh на вашем сервере.
+          Подпись отладочная — для личного устройства этого достаточно."
