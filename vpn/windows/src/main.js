@@ -167,6 +167,8 @@ async function refreshStatus() {
         el.sent.textContent = formatBytes(status.tx);
         el.received.classList.add("up");
         el.sent.classList.add("up");
+        // Адаптер включён, но сервер ещё ни разу не ответил — трафика нет.
+        if (status.handshake === false) el.status.textContent = "Ждём ответа сервера…";
       }
       return status.up;
     } catch {
@@ -272,14 +274,9 @@ async function connectReal() {
       toast("Сначала вставьте ключ — его выдаёт бот");
       return;
     }
-    const needsInstall = !(await invoke("wireguard_installed"));
-    if (needsInstall) {
-      el.status.textContent = "Ставим WireGuard…";
-      toast("Настраиваем WireGuard — если появится окно установки, нажмите «Установить», это один раз");
-    }
     await invoke("connect", { configText: key });
   } catch (err) {
-    missingKey = messageOf(err).startsWith("Неверная конфигурация VPN:") || messageOf(err).includes("(1066/2)");
+    missingKey = messageOf(err).startsWith("Неверная конфигурация VPN:");
     toast(`Не удалось соединиться: ${messageOf(err)}`, true);
   } finally {
     setBusy(false);

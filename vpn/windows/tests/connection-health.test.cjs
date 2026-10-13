@@ -41,7 +41,7 @@ async function app(overrides = {}) {
       case "disconnect": state.disconnects++; state.connected = false; return;
       case "connect": state.connects++; state.connected = true; return;
       case "load_key": return "test config";
-      case "has_switchable_code": case "wireguard_installed": return true;
+      case "has_switchable_code": return true;
       case "current_country": return state.country;
       case "switch_country": state.country = args.country; return true;
       case "is_demo_key": return false;

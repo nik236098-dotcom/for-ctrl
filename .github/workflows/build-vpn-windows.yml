@@ -23,6 +23,35 @@ jobs:
       - name: Проверка статуса подписки и ключа
         run: python -m unittest discover -s vpn/bot/tests -p "test_*.py"
 
+      # Драйвер туннеля встроен в установщик: официальный wireguard.dll
+      # (WireGuardNT) — именно в том виде, в каком его раздаёт
+      # download.wireguard.com (так требует README самого WireGuardNT).
+      # Берём последнюю версию и не пропускаем файл без действующей подписи
+      # WireGuard LLC.
+      - name: Драйвер WireGuardNT
+        shell: pwsh
+        run: |
+          $base = "https://download.wireguard.com/wireguard-nt/"
+          $index = (Invoke-WebRequest -UseBasicParsing $base).Content
+          $latest = [regex]::Matches($index, 'wireguard-nt-(\d+(?:\.\d+)+)\.zip') |
+            Sort-Object { [version]$_.Groups[1].Value } -Descending |
+            Select-Object -First 1
+          if (-not $latest) { throw "На $base не найден архив wireguard-nt" }
+          $zip = Join-Path $env:RUNNER_TEMP $latest.Value
+          $dir = Join-Path $env:RUNNER_TEMP "wireguard-nt"
+          Invoke-WebRequest -UseBasicParsing ($base + $latest.Value) -OutFile $zip
+          Expand-Archive $zip -DestinationPath $dir -Force
+          $dll = Get-ChildItem $dir -Recurse -Filter wireguard.dll |
+            Where-Object { $_.FullName -match '\\amd64\\' } | Select-Object -First 1
+          if (-not $dll) { throw "В архиве нет bin/amd64/wireguard.dll" }
+          $sig = Get-AuthenticodeSignature $dll.FullName
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'WireGuard LLC') {
+            throw "Подпись wireguard.dll не прошла проверку: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          New-Item -ItemType Directory -Force vpn/windows/src-tauri/resources | Out-Null
+          Copy-Item $dll.FullName vpn/windows/src-tauri/resources/wireguard.dll
+          Write-Host "WireGuardNT $($latest.Groups[1].Value), подпись: $($sig.SignerCertificate.Subject)"
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -32,7 +61,7 @@ jobs:
       - name: Установка tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Проверка службы Windows и ответов сервера ключей
+      - name: Проверка разбора ключа и ответов сервера ключей
         working-directory: vpn/windows/src-tauri
         env:
           KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
@@ -67,9 +96,7 @@ jobs:
             --title "RU VPN — установщик для Windows" \
             --notes "Клиент WireGuard для Windows, собран из коммита $GITHUB_SHA.
 
-          При первом подключении, если официальный WireGuard for Windows не
-          установлен, приложение само его тихо ставит (одно окно с
-          прогресс-баром, без кликов) — дальше используется только это
-          приложение. Требует прав администратора (запрашиваются один раз
-          при запуске) — управляет системным сервисом тунеля."
-
+          Драйвер туннеля (официальный WireGuardNT) встроен в установщик:
+          отдельный WireGuard ставить не нужно, служб Windows приложение не
+          создаёт. Требует прав администратора (запрашиваются один раз при
+          запуске). VPN работает, пока открыто приложение."

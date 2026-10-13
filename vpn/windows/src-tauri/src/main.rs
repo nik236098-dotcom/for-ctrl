@@ -1,9 +1,7 @@
-// Ru VPN для Windows — тот же дизайн, что в Android-приложении, но
-// туннель поднимает не своя реализация WireGuard, а официальный
-// wireguard.exe (WireGuard for Windows), которым это приложение просто
-// управляет из-под капота. Причина — см. vpn/windows/README.md: подписанный
-// ядерный драйвер (Wintun) с нуля своими силами не собрать и не подписать,
-// а официальный уже есть и работает.
+// Ru VPN для Windows — тот же дизайн, что в Android-приложении. Туннель
+// поднимает само приложение через встроенный драйвер WireGuardNT
+// (wireguard.dll в установщике, см. tunnel.rs): ни отдельной программы
+// WireGuard, ни служб Windows.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 use serde::Serialize;
@@ -14,10 +12,12 @@ use std::time::Duration;
 use tauri::Manager;
 
 mod config;
-mod service;
-use service::State as ServiceState;
+#[cfg(windows)]
+mod net;
+#[cfg(windows)]
+mod tunnel;
 
-// No concurrent install/uninstall, including calls from background checks.
+// Подключение и отключение — строго по одному, даже при двойном клике.
 static TUNNEL_OPERATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn command_output(command: Command, timeout: Duration) -> Result<std::process::Output, String> {
@@ -28,9 +28,8 @@ async fn command_output(command: Command, timeout: Duration) -> Result<std::proc
         .map_err(|e| e.to_string())
 }
 
-/// Обычный `Command::new` из консольного приложения на Windows на долю
-/// секунды показывает мелькающее окно консоли — заметно, когда его дёргают
-/// раз в 2 секунды (опрос статуса тунеля). CREATE_NO_WINDOW убирает это
+/// Обычный `Command::new` из оконного приложения на Windows на долю
+/// секунды показывает мелькающее окно консоли. CREATE_NO_WINDOW убирает это
 /// окно полностью, поведение команды не меняет.
 fn new_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut cmd = Command::new(program);
@@ -46,7 +45,6 @@ fn new_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
 const PREFIX: &str = "ruvpn://";
 const DEMO_KEY: &str = "test1590";
 const DEMO_SENTINEL: &str = "demo:test1590";
-const TUNNEL_NAME: &str = "ruvpn";
 const DEFAULT_COUNTRY: &str = "ru";
 
 /// Адрес сервера ключей — вшивается на этапе сборки (см. .github/workflows,
@@ -321,300 +319,47 @@ async fn resolve_key(text: String) -> Result<ResolvedKey, String> {
     }
 }
 
-// --- официальный WireGuard for Windows -----------------------------------
+// --- туннель -------------------------------------------------------------
 
-fn wireguard_exe() -> PathBuf {
-    let program_files =
-        std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
-    PathBuf::from(program_files).join("WireGuard").join("wireguard.exe")
+/// wireguard.dll из папки установки (Tauri кладёт туда resources/ из
+/// tauri.conf.json).
+fn driver_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .resolve("resources/wireguard.dll", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| format!("Не найден драйвер VPN ({e}). Переустановите Ru VPN."))
 }
 
 #[tauri::command]
-fn wireguard_installed() -> bool {
-    wireguard_exe().exists()
+async fn connect(app: tauri::AppHandle, config_text: String) -> Result<(), String> {
+    connect_with(config_text, || driver_path(&app)).await
 }
 
-const WIREGUARD_INDEX_URL: &str = "https://download.wireguard.com/windows-client/";
-
-/// Имена вида `wireguard-amd64-0.5.3.msi` — любые из встречающихся в HTML
-/// как отдельные строки в кавычках (атрибут ссылки), без предположений о
-/// точной разметке страницы.
-fn extract_msi_filenames(html: &str) -> Vec<&str> {
-    html.split(['"', '\''])
-        .filter(|token| token.starts_with("wireguard-amd64-") && token.ends_with(".msi"))
-        .collect()
-}
-
-fn parse_msi_version(name: &str) -> Option<(u32, u32, u32)> {
-    let stem = name.strip_prefix("wireguard-amd64-")?.strip_suffix(".msi")?;
-    let mut parts = stem.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().unwrap_or(0);
-    Some((major, minor, patch))
-}
-
-/// Прямая ссылка на MSI-пакет последней версии (не на bootstrapper .exe) —
-/// нужна, чтобы поставить его по-настоящему без единого окна через
-/// `msiexec /quiet`, в отличие от .exe-обёртки (см. [install_wireguard]).
-/// ЛУЧШАЯ ПОПЫТКА, не проверено вживую: если формат страницы окажется
-/// другим и разбор не найдёт ни одного файла — [install_wireguard] сам
-/// откатится на прежний (видимый) способ через .exe.
-async fn find_latest_msi_url() -> Option<String> {
-    let html = reqwest::get(WIREGUARD_INDEX_URL).await.ok()?.text().await.ok()?;
-    extract_msi_filenames(&html)
-        .into_iter()
-        .filter_map(|name| parse_msi_version(name).map(|version| (version, name)))
-        .max_by_key(|(version, _)| *version)
-        .map(|(_, name)| format!("{WIREGUARD_INDEX_URL}{name}"))
-}
-
-/// Тихая установка через прямой MSI-пакет — по-настоящему без единого
-/// окна (`msiexec /quiet` — не предположение, а стандартное, всегда
-/// безголовое поведение Windows Installer).
-async fn install_via_msi(url: &str) -> Result<(), String> {
-    let bytes = reqwest::get(url)
-        .await
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
-        .map_err(|e| e.to_string())?;
-    let path = std::env::temp_dir().join("ruvpn-wireguard-latest.msi");
-    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-    let status = new_command("msiexec")
-        .arg("/i")
-        .arg(&path)
-        .arg("/quiet")
-        .arg("/qn")
-        .arg("/norestart")
-        .status()
-        .map_err(|e| e.to_string());
-    fs::remove_file(&path).ok();
-    if !status?.success() {
-        return Err("msiexec не смог поставить пакет".to_string());
-    }
-    Ok(())
-}
-
-async fn download_installer() -> Result<PathBuf, String> {
-    let url = "https://download.wireguard.com/windows-client/wireguard-installer.exe";
-    let bytes = reqwest::get(url)
-        .await
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
-        .map_err(|e| e.to_string())?;
-    let path = std::env::temp_dir().join("wireguard-installer.exe");
-    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-    Ok(path)
-}
-
-/// Установка официального клиента: приложение уже само запущено от
-/// администратора (windows/app.manifest), поэтому дочерний установщик
-/// наследует те же права и не спрашивает UAC повторно.
-///
-/// Сначала пробуем по-настоящему тихий путь — сам MSI-пакет через
-/// `msiexec /quiet` (см. [install_via_msi]), без единого окна. Если он по
-/// любой причине не сработал (страница со ссылками на MSI изменила
-/// формат, сеть подвела и т.п.) — откатываемся на официальный .exe-
-/// установщик; на практике (по отзыву с реального устройства) его окно
-/// само не закрывается, там нужно нажать «Установить» руками — фронтенд
-/// предупреждает об этом тостом на случай, если дойдёт до этого шага.
-#[tauri::command]
-async fn install_wireguard() -> Result<(), String> {
-    if wireguard_installed() {
-        return Ok(());
-    }
-
-    if let Some(msi_url) = find_latest_msi_url().await {
-        if install_via_msi(&msi_url).await.is_ok() && wireguard_installed() {
-            return Ok(());
-        }
-    }
-
-    let installer = download_installer().await?;
-    let status = new_command(&installer)
-        .status()
-        .map_err(|e| format!("не удалось запустить установщик: {e}"))?;
-    fs::remove_file(&installer).ok();
-    if !status.success() {
-        return Err(format!(
-            "установщик WireGuard завершился с кодом {:?}",
-            status.code()
-        ));
-    }
-    if wireguard_installed() {
-        Ok(())
-    } else {
-        Err("после установки wireguard.exe не найден — установите вручную с wireguard.com/install".to_string())
-    }
-}
-
-/// Официальный WireGuardManager сам открывает своё окно менеджера для
-/// вошедшего пользователя, когда служба менеджера впервые стартует после
-/// установки (см. его собственный журнал: "Starting UI process for
-/// user…") — это его поведение, не наш вызов, поэтому подавить это можно
-/// только закрыв уже появившееся окно самим. ЛУЧШАЯ ПОПЫТКА, не проверено
-/// вживую: несколько попыток с паузой, пока окно не появится (или не
-/// истечёт время) — если не найдём, просто ничего не делаем, окно
-/// останется открытым, как сейчас.
-#[cfg(windows)]
-async fn close_wireguard_manager_window() {
-    // HWND (сырой указатель внутри) не Send — держать его через .await
-    // нельзя (именно на этом упала первая версия: "future returned by
-    // `connect` is not Send"). Весь поиск и ожидание — в отдельном потоке
-    // синхронно (std::thread::sleep, не tokio::time::sleep), наружу
-    // уходит только пустой результат.
-    let _ = tokio::task::spawn_blocking(|| {
-        use windows::core::PCWSTR;
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
-
-        let title: Vec<u16> = "WireGuard\0".encode_utf16().collect();
-        for _ in 0..10 {
-            if let Ok(hwnd) = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) } {
-                if !hwnd.is_invalid() {
-                    unsafe {
-                        let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
-                    }
-                    return;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-    })
-    .await;
-}
-
-#[tauri::command]
-async fn connect(config_text: String) -> Result<(), String> {
+async fn connect_with(config_text: String, driver: impl FnOnce() -> Result<PathBuf, String>) -> Result<(), String> {
     let _operation = TUNNEL_OPERATION.try_lock()
         .map_err(|_| "Подключение уже меняется. Дождитесь завершения операции.".to_string())?;
-    // Catch corrupt saved data before launching WireGuard or changing its file.
-    let config_text = config::validate(&config_text)?;
-    let service_name = format!("WireGuardTunnel${TUNNEL_NAME}");
-    // A running tunnel is already connected. A pending stop/start must settle
-    // before installation; errors querying SCM must never mean "not installed".
-    let current = wait_for_stable_service(&service_name, Duration::from_secs(20)).await?;
-    if current.state == ServiceState::Running {
-        return Ok(());
+    // Битый сохранённый ключ отвергается до любых действий с сетью.
+    let parsed = config::parse(&config_text)?;
+    let driver = driver()?;
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(move || tunnel::start(&driver, &parsed))
+            .await
+            .map_err(|e| e.to_string())?
     }
-    if !matches!(current.state, ServiceState::Missing | ServiceState::Stopped) {
-        return Err(format!("Необычное состояние службы WireGuard: {:?}", current.state));
+    #[cfg(not(windows))]
+    {
+        let _ = (driver, parsed);
+        Err("Ru VPN подключается только в Windows".to_string())
     }
-
-    let freshly_installed = !wireguard_installed();
-    if freshly_installed {
-        install_wireguard().await?;
-        #[cfg(windows)]
-        close_wireguard_manager_window().await;
-    }
-
-    let conf_path = tunnel_conf_path();
-    fs::create_dir_all(conf_path.parent().unwrap()).map_err(|e| e.to_string())?;
-    config::write_validated(&conf_path, &config_text)?;
-
-    let mut installed = install_tunnel_service(&conf_path).await;
-    // The installer may lose a race to another process. Only SCM can confirm
-    // success; never infer it solely from the English error string.
-    let observed = wait_for_stable_service(&service_name, Duration::from_secs(20)).await?;
-    if observed.state == ServiceState::Running {
-        return Ok(());
-    }
-    if installed.is_err() && freshly_installed {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        installed = install_tunnel_service(&conf_path).await;
-    }
-    installed?;
-    wait_for_service_running(&service_name, Duration::from_secs(20)).await
-}
-
-async fn wait_for_stable_service(name: &str, timeout: Duration) -> Result<service::Snapshot, String> {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        let status = service::query(name)?;
-        if !status.state.transitioning() {
-            return Ok(status);
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!("Служба WireGuard не завершила переход: {}. Закройте другие окна WireGuard и повторите.", status.state.label()));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-}
-
-async fn wait_for_service_running(name: &str, timeout: Duration) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        let status = service::query(name)?;
-        if status.state == ServiceState::Running {
-            return Ok(());
-        }
-        if status.state == ServiceState::Stopped && status.exit_code != 0 {
-            return Err(status.failure_message());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!("Служба WireGuard не запустилась вовремя ({}; Windows {}; WireGuard {})", status.state.label(), status.exit_code, status.service_exit_code));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-}
-
-fn tunnel_conf_path() -> PathBuf {
-    std::env::temp_dir()
-        .join("ruvpn-windows")
-        .join(format!("{TUNNEL_NAME}.conf"))
-}
-
-async fn install_tunnel_service(conf_path: &std::path::Path) -> Result<(), String> {
-    let mut command = new_command(wireguard_exe());
-    command.arg("/installtunnelservice").arg(conf_path);
-    let output = command_output(command, Duration::from_secs(30)).await?;
-    if !output.status.success() {
-        return Err(command_error(&output.stderr, output.status.code()));
-    }
-    Ok(())
 }
 
 #[tauri::command]
 async fn disconnect() -> Result<(), String> {
     let _operation = TUNNEL_OPERATION.try_lock()
         .map_err(|_| "Подключение уже меняется. Дождитесь завершения операции.".to_string())?;
-    let name = format!("WireGuardTunnel${TUNNEL_NAME}");
-    if service::query(&name)?.state != ServiceState::Missing {
-        let mut command = new_command(wireguard_exe());
-        command.arg("/uninstalltunnelservice").arg(TUNNEL_NAME);
-        let result = command_output(command, Duration::from_secs(30)).await;
-        if service::query(&name)?.state != ServiceState::Missing {
-            let output = result?;
-            if !output.status.success() {
-                return Err(command_error(&output.stderr, output.status.code()));
-            }
-        }
-        // Uninstall requests deletion asynchronously. Keep the config until
-        // SCM confirms removal, otherwise an immediate reconnect races deletion.
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        loop {
-            if service::query(&name)?.state == ServiceState::Missing {
-                break;
-            }
-            if std::time::Instant::now() >= deadline {
-                return Err("Windows ещё не удалила службу WireGuard. Закройте окно управления службами и попробуйте снова.".to_string());
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    }
-    fs::remove_file(tunnel_conf_path()).ok();
+    #[cfg(windows)]
+    tokio::task::spawn_blocking(tunnel::stop).await.map_err(|e| e.to_string())?;
     Ok(())
-}
-
-fn command_error(stderr: &[u8], code: Option<i32>) -> String {
-    let text = String::from_utf8_lossy(stderr).trim().to_string();
-    if text.is_empty() {
-        format!("wireguard.exe вернул код {code:?}")
-    } else {
-        text
-    }
 }
 
 #[derive(Serialize)]
@@ -624,57 +369,56 @@ struct TunnelStatus {
     transitioning: bool,
     rx: u64,
     tx: u64,
+    handshake: bool,
 }
 
 #[tauri::command]
 async fn tunnel_status() -> Result<TunnelStatus, String> {
-    let status = service::query(&format!("WireGuardTunnel${TUNNEL_NAME}"))?;
-    let up = status.state == ServiceState::Running;
-    let (rx, tx) = if up {
-        read_interface_bytes(TUNNEL_NAME).unwrap_or((0, 0))
-    } else {
-        (0, 0)
+    #[cfg(windows)]
+    let (up, rx, tx, handshake) = {
+        let stats = tokio::task::spawn_blocking(tunnel::stats).await.map_err(|e| e.to_string())?;
+        (stats.up, stats.rx, stats.tx, stats.handshake)
     };
-    Ok(TunnelStatus { up, state: status.state.label(), transitioning: status.state.transitioning(), rx, tx })
+    #[cfg(not(windows))]
+    let (up, rx, tx, handshake) = (false, 0, 0, false);
+    Ok(TunnelStatus {
+        up,
+        state: if up { "running" } else { "stopped" },
+        // Подключение и отключение происходят внутри самих команд connect /
+        // disconnect — между вызовами туннель всегда в конечном состоянии.
+        transitioning: false,
+        rx,
+        tx,
+        handshake,
+    })
 }
 
-/// Счётчики трафика — тем же способом, что и любой другой сетевой адаптер
-/// в диспетчере задач Windows: тунель WireGuard виден системе как обычный
-/// сетевой интерфейс (см. вывод `ipconfig` — "Неизвестный адаптер ruvpn",
-/// описание "WireGuard Tunnel"), у него есть стандартные счётчики байт
-/// через IP Helper API. Это не самопальный протокол — задокументированный
-/// Win32 API, тот же MIB_IF_ROW2, что использует сама Windows.
+/// Версии до 0.2.0 поднимали туннель службой официального WireGuard
+/// (WireGuardTunnel$ruvpn). Если она осталась — особенно зависшая в
+/// «Запускается», — её маршруты спорили бы с новым туннелем. Отключаем её
+/// автозапуск (это работает даже у зависшей службы, и после перезагрузки
+/// она больше не поднимется), пробуем остановить и удалить. Всё — лучшая
+/// попытка в фоне, на подключение не влияет.
 #[cfg(windows)]
-fn read_interface_bytes(alias: &str) -> Option<(u64, u64)> {
-    use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
-
-    unsafe {
-        let mut table_ptr: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
-        if GetIfTable2(&mut table_ptr).is_err() || table_ptr.is_null() {
-            return None;
-        }
-        let table = &*table_ptr;
-        let count = table.NumEntries as usize;
-        let rows = std::slice::from_raw_parts(table.Table.as_ptr(), count);
-
-        let result = rows.iter().find_map(|row| {
-            let row_alias = String::from_utf16_lossy(&row.Alias);
-            let row_alias = row_alias.trim_end_matches('\u{0}');
-            if row_alias.eq_ignore_ascii_case(alias) {
-                Some((row.InOctets, row.OutOctets))
-            } else {
-                None
-            }
-        });
-
-        FreeMibTable(table_ptr as *const core::ffi::c_void);
-        result
+async fn retire_old_wireguard_service() {
+    const OLD_SERVICE: &str = "WireGuardTunnel$ruvpn";
+    let mut disable = new_command("sc.exe");
+    disable.args(["config", OLD_SERVICE, "start=", "disabled"]);
+    match command_output(disable, Duration::from_secs(10)).await {
+        Ok(output) if output.status.success() => {}
+        // Службы нет (код 1060) — значит, и делать нечего.
+        _ => return,
     }
-}
-
-#[cfg(not(windows))]
-fn read_interface_bytes(_alias: &str) -> Option<(u64, u64)> {
-    None
+    let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+    let wireguard = PathBuf::from(program_files).join("WireGuard").join("wireguard.exe");
+    if wireguard.exists() {
+        let mut uninstall = new_command(&wireguard);
+        uninstall.args(["/uninstalltunnelservice", "ruvpn"]);
+        command_output(uninstall, Duration::from_secs(30)).await.ok();
+    }
+    let mut delete = new_command("sc.exe");
+    delete.args(["delete", OLD_SERVICE]);
+    command_output(delete, Duration::from_secs(10)).await.ok();
 }
 
 #[tauri::command]
@@ -737,16 +481,26 @@ fn main() {
             has_switchable_code,
             key_status,
             switch_country,
-            wireguard_installed,
-            install_wireguard,
             connect,
             disconnect,
             tunnel_status,
             check_ip,
             clipboard_text,
         ])
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска Ru VPN");
+        .setup(|_app| {
+            #[cfg(windows)]
+            tauri::async_runtime::spawn(retire_old_wireguard_service());
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("ошибка запуска Ru VPN")
+        .run(|_app, event| {
+            // Адаптер и так исчезает вместе с процессом; здесь — аккуратно и сразу.
+            if let tauri::RunEvent::Exit = event {
+                #[cfg(windows)]
+                tunnel::stop();
+            }
+        });
 }
 
 #[cfg(test)]
@@ -767,9 +521,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_saved_config_is_rejected_before_querying_scm_or_starting_wireguard() {
+    fn invalid_saved_config_is_rejected_before_loading_the_driver() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-            let error = super::connect("s".to_string()).await.unwrap_err();
+            let error = super::connect_with("s".to_string(), || panic!("driver must not be touched")).await.unwrap_err();
             assert!(error.starts_with("Неверная конфигурация VPN:"));
         });
     }
