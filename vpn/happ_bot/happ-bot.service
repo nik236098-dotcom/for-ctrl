@@ -1,0 +1,21 @@
+[Unit]
+Description=Happ VPN — телеграм-бот подписки (VLESS+Reality)
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=happvpnbot
+Group=happvpnbot
+WorkingDirectory=/opt/happ-vpn/happ_bot
+EnvironmentFile=/opt/happ-vpn/happ_bot/.env
+ExecStart=/opt/happ-vpn/happ_bot/venv/bin/python -m happ_bot
+Restart=always
+RestartSec=5
+
+# NoNewPrivileges/ProtectSystem намеренно не включены: бот запускает
+# серверные скрипты через sudo, а те пишут в /usr/local/etc/xray.
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

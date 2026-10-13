@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!--
+        usesCleartextTraffic: сервер ключей — обычно голый http:// на свежем
+        VDS без домена и сертификата (KeyStore.kt, KEY_SERVER_URL), Android
+        9+ такой трафик блокирует по умолчанию. Компромисс осознанный: тем
+        же запросом передаётся приватный ключ WireGuard, так что как
+        появится домен — стоит поставить перед сервером ключей HTTPS
+        (например, Let's Encrypt через Caddy/nginx) и снять этот флаг.
+    -->
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RuVPN"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            Сам VpnService объявлен в манифесте библиотеки
+            com.wireguard.android:tunnel (GoBackend$VpnService) и
+            подмешивается сюда манифест-мерджером.
+        -->
+    </application>
+</manifest>

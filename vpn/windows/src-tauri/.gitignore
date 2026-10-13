@@ -1,0 +1,3 @@
+# Официальный wireguard.dll скачивается при сборке (см. workflow), в git не храним.
+/resources/wireguard.dll
+/target/
