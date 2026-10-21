@@ -47,8 +47,8 @@
 
   <div id="overlay" class="overlay" hidden>
     <div class="dialog-card">
-      <div class="dialog-title">Ключ доступа</div>
-      <div class="dialog-help">Вставьте ключ, который прислал бот</div>
+      <div id="keyDialogTitle" class="dialog-title">Ключ доступа</div>
+      <div id="keyDialogHelp" class="dialog-help">Вставьте ключ, который прислал бот</div>
       <textarea id="inputKey" class="key-input" placeholder="Ab3xK9pQ" rows="3"></textarea>
       <button id="buttonPasteClipboard" class="flat-button">Вставить из буфера</button>
       <div class="dialog-actions">
@@ -62,6 +62,7 @@
     <div class="dialog-card">
       <div class="dialog-title">Сервер</div>
       <div class="dialog-help">Откуда будет ваш ip</div>
+      <button id="buttonMainServer" class="flat-button country-button" hidden>Основной ключ</button>
       <button id="buttonCountryRu" class="flat-button country-button">
         <svg class="flag-icon" viewBox="0 0 24 16" aria-hidden="true">
           <rect width="24" height="16" fill="#fff" />
@@ -83,6 +84,8 @@
         </svg>
         США
       </button>
+      <div id="extraServers" class="extra-servers"></div>
+      <button id="buttonAddServer" class="flat-button country-button">+ Добавить сервер</button>
       <button id="textCountryCancel" class="country-cancel">Отмена</button>
     </div>
   </div>

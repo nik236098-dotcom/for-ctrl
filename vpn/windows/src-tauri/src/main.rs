@@ -12,6 +12,7 @@ use std::time::Duration;
 use tauri::Manager;
 
 mod config;
+mod servers;
 #[cfg(windows)]
 mod net;
 #[cfg(windows)]
@@ -66,6 +67,16 @@ fn meta_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("key_meta.json"))
+}
+
+fn servers_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("servers.json"))
+}
+
+fn load_servers(app: &tauri::AppHandle) -> servers::Store {
+    servers_file(app).map(|path| servers::Store::load(&path)).unwrap_or_default()
 }
 
 /// Код (если ключ пришёл коротким кодом от бота — не вставленным вручную
@@ -132,7 +143,85 @@ fn save_demo(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn is_demo(app: tauri::AppHandle) -> bool {
-    load_key(app).as_deref() == Some(DEMO_SENTINEL)
+    load_servers(&app).selected.is_none() && load_key(app).as_deref() == Some(DEMO_SENTINEL)
+}
+
+// --- дополнительные серверы ----------------------------------------------
+
+#[derive(Serialize)]
+struct ServerList {
+    /// None — выбран основной ключ.
+    selected: Option<String>,
+    servers: Vec<servers::Entry>,
+    /// Есть ли основной ключ (от бота или вставленный вручную).
+    has_main: bool,
+    /// Можно ли у основного ключа менять страну (ключ коротким кодом от бота).
+    main_switchable: bool,
+    /// Имя основного ключа, если он вставлен готовым конфигом: «Сервер <адрес>».
+    main_name: Option<String>,
+}
+
+#[tauri::command]
+fn list_servers(app: tauri::AppHandle) -> ServerList {
+    let store = load_servers(&app);
+    let main = load_key(app.clone()).filter(|key| key != DEMO_SENTINEL);
+    let main_name = main.as_deref()
+        .and_then(|key| config::parse(key).ok())
+        .and_then(|parsed| parsed.peers.first().map(|peer| format!("Сервер {}", peer.endpoint.0)));
+    ServerList {
+        selected: store.selected.clone(),
+        servers: store.entries(),
+        has_main: main.is_some(),
+        main_switchable: read_meta(&app).and_then(|meta| meta.code).is_some(),
+        main_name,
+    }
+}
+
+/// Добавляет сервер рядом с основным ключом (не вместо него) и выбирает его.
+/// Принимает всё то же, что и окно ключа: готовый конфиг, ruvpn://… или
+/// короткий код от бота.
+#[tauri::command]
+async fn add_server(app: tauri::AppHandle, text: String) -> Result<servers::Entry, String> {
+    let resolved = resolve_key(text).await?;
+    let path = servers_file(&app)?;
+    let mut store = servers::Store::load(&path);
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_else(|_| "1".to_string());
+    let entry = store.add(resolved.text, id)?;
+    store.save(&path)?;
+    Ok(entry)
+}
+
+/// id = None — снова основной ключ.
+#[tauri::command]
+fn select_server(app: tauri::AppHandle, id: Option<String>) -> Result<(), String> {
+    let path = servers_file(&app)?;
+    let mut store = servers::Store::load(&path);
+    store.select(id)?;
+    store.save(&path)
+}
+
+/// true — удалили выбранный сервер, подключение перешло на основной ключ.
+#[tauri::command]
+fn remove_server(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let path = servers_file(&app)?;
+    let mut store = servers::Store::load(&path);
+    let was_selected = store.remove(&id);
+    store.save(&path)?;
+    Ok(was_selected)
+}
+
+/// Конфиг, которым подключаться сейчас: выбранный дополнительный сервер или
+/// основной ключ.
+#[tauri::command]
+fn active_config(app: tauri::AppHandle) -> Option<String> {
+    let store = load_servers(&app);
+    match store.selected_config() {
+        Some(config) => Some(config.to_string()),
+        None => load_key(app),
+    }
 }
 
 /// Текущая выбранная страна ("ru", если ключ не менял страну ни разу или
@@ -155,6 +244,10 @@ fn has_switchable_code(app: tauri::AppHandle) -> bool {
 /// Проверка ничего не меняет в сохранённом конфиге или на сервере.
 #[tauri::command]
 async fn key_status(app: tauri::AppHandle) -> &'static str {
+    // Подключены дополнительным сервером — подписка бота к нему отношения не имеет.
+    if load_servers(&app).selected.is_some() {
+        return "unmanaged";
+    }
     let meta = match read_meta(&app) {
         Some(meta) => meta,
         None => return "unmanaged",
@@ -210,13 +303,14 @@ async fn switch_country(app: tauri::AppHandle, country: String) -> Result<bool, 
         Some(code) => code,
         None => return Ok(false),
     };
-    if meta.country == country {
-        return Ok(true);
+    if meta.country != country {
+        let text = fetch_config(&code, &country).await?;
+        let key_path = key_file(&app)?;
+        config::write_validated(&key_path, &text)?;
+        write_meta(&app, Some(&code), &country)?;
     }
-    let text = fetch_config(&code, &country).await?;
-    let key_path = key_file(&app)?;
-    config::write_validated(&key_path, &text)?;
-    write_meta(&app, Some(&code), &country)?;
+    // Выбор страны — это выбор основного ключа.
+    select_server(app, None)?;
     Ok(true)
 }
 
@@ -481,6 +575,11 @@ fn main() {
             has_switchable_code,
             key_status,
             switch_country,
+            list_servers,
+            add_server,
+            select_server,
+            remove_server,
+            active_config,
             connect,
             disconnect,
             tunnel_status,

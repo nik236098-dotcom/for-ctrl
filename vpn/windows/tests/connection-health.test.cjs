@@ -15,7 +15,8 @@ function deferred() {
 async function app(overrides = {}) {
   const state = {
     connected: true, demo: false, ipFails: false, keyStatus: "active",
-    disconnects: 0, connects: 0, keyCalls: 0, country: "ru", hooks: {}, ...overrides,
+    disconnects: 0, connects: 0, keyCalls: 0, country: "ru", hooks: {},
+    selected: null, servers: [], lastConfig: null, ...overrides,
   };
   const elements = new Map();
   const element = (id) => {
@@ -39,11 +40,32 @@ async function app(overrides = {}) {
         if (state.keyStatus instanceof Error) throw state.keyStatus;
         return state.keyStatus;
       case "disconnect": state.disconnects++; state.connected = false; return;
-      case "connect": state.connects++; state.connected = true; return;
+      case "connect": state.connects++; state.connected = true; state.lastConfig = args.configText; return;
       case "load_key": return "test config";
+      case "active_config": {
+        const server = state.servers.find((s) => s.id === state.selected);
+        return server ? server.config : "test config";
+      }
+      case "list_servers": return {
+        selected: state.selected, servers: state.servers.map(({ id, name }) => ({ id, name })),
+        has_main: true, main_switchable: true, main_name: null,
+      };
+      case "select_server": state.selected = args.id; return;
+      case "add_server": {
+        const entry = { id: `id${state.servers.length + 1}`, name: "Сервер 77.91.72.22", config: `extra:${args.text}` };
+        state.servers.push(entry);
+        state.selected = entry.id;
+        return { id: entry.id, name: entry.name };
+      }
+      case "remove_server": {
+        state.servers = state.servers.filter((s) => s.id !== args.id);
+        const was = state.selected === args.id;
+        if (was) state.selected = null;
+        return was;
+      }
       case "has_switchable_code": return true;
       case "current_country": return state.country;
-      case "switch_country": state.country = args.country; return true;
+      case "switch_country": state.country = args.country; state.selected = null; return true;
       case "is_demo_key": return false;
       case "resolve_key": return { text: "new config", code: "newcode" };
       case "save_key": return;
@@ -258,7 +280,7 @@ test("install error and failed status refresh always release busy state", async 
 
 test("key load failure also releases busy state", async () => {
   const a = await app();
-  a.state.hooks.load_key = () => { throw new Error("read failed"); };
+  a.state.hooks.active_config = () => { throw new Error("read failed"); };
   await a.context.connectReal();
   assert.equal(a.element("buttonToggle").disabled, false);
   assert.equal(a.element("connectingRing").hidden, true);
@@ -279,4 +301,44 @@ test("startup status error does not stop subsequent polling", async () => {
   delete a.state.hooks.tunnel_status;
   await a.context.refreshStatus();
   assert.equal(a.element("textStatus").textContent, "Впн включен");
+});
+
+test("adding a server keeps the main key and reconnects through the new server", async () => {
+  const a = await app();
+  await a.context.openKeyDialog("add");
+  a.element("inputKey").value = "[Interface] backup";
+  await a.context.saveKey();
+  assert.equal(a.state.servers.length, 1);
+  assert.equal(a.state.selected, "id1");
+  assert.equal(a.state.disconnects, 1);
+  assert.equal(a.state.lastConfig, "extra:[Interface] backup");
+  assert.match(a.element("toast").textContent, /добавлен/);
+});
+
+test("switching between main key and extra server reconnects only on a real change", async () => {
+  const a = await app({ servers: [{ id: "x", name: "Сервер 77.91.72.22", config: "backup config" }] });
+  await a.context.chooseServer("x");
+  assert.equal(a.state.lastConfig, "backup config");
+  assert.equal(a.state.connects, 1);
+  await a.context.chooseServer("x");
+  assert.equal(a.state.connects, 1);
+  await a.context.chooseCountry("ru");
+  assert.equal(a.state.selected, null);
+  assert.equal(a.state.lastConfig, "test config");
+  assert.equal(a.state.connects, 2);
+});
+
+test("removing the server in use falls back to the main key", async () => {
+  const a = await app({ selected: "x", servers: [{ id: "x", name: "Сервер 77.91.72.22", config: "backup config" }] });
+  await a.context.removeServer("x");
+  assert.equal(a.state.servers.length, 0);
+  assert.equal(a.state.lastConfig, "test config");
+  assert.equal(a.state.connects, 1);
+});
+
+test("a disconnected app only changes the selection, it never connects by itself", async () => {
+  const a = await app({ connected: false, servers: [{ id: "x", name: "Сервер", config: "backup config" }] });
+  await a.context.chooseServer("x");
+  assert.equal(a.state.selected, "x");
+  assert.equal(a.state.connects, 0);
 });

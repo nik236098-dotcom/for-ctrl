@@ -21,6 +21,11 @@ const el = {
   countryRu: document.getElementById("buttonCountryRu"),
   countryUs: document.getElementById("buttonCountryUs"),
   countryCancel: document.getElementById("textCountryCancel"),
+  mainServer: document.getElementById("buttonMainServer"),
+  extraServers: document.getElementById("extraServers"),
+  addServer: document.getElementById("buttonAddServer"),
+  keyDialogTitle: document.getElementById("keyDialogTitle"),
+  keyDialogHelp: document.getElementById("keyDialogHelp"),
   toast: document.getElementById("toast"),
   ipFlag: document.getElementById("ipFlag"),
 };
@@ -36,6 +41,8 @@ let revokedKeyStreak = 0;
 let watchingConnection = false;
 let togglePending = false;
 let statusRefresh = null;
+// Окно ключа открыто для основного ключа ("main") или для нового сервера ("add").
+let keyDialogMode = "main";
 
 function checkIsCurrent(generation) {
   return !busy && generation === connectionGeneration;
@@ -121,7 +128,8 @@ async function render(up) {
   }
 
   el.keyButton.textContent = (await hasAnyKey()) ? "Заменить ключ" : "Вставить ключ";
-  el.changeServerHint.hidden = !(await invoke("has_switchable_code"));
+  // Окно «Сервер» доступно всегда: в нём же добавляются свои серверы.
+  el.changeServerHint.hidden = false;
 
   if (!shown) {
     el.received.textContent = "0 КБ";
@@ -268,7 +276,7 @@ async function connectReal() {
   setBusy(true);
   let missingKey = false;
   try {
-    const key = await invoke("load_key");
+    const key = await invoke("active_config");
     if (!key) {
       missingKey = true;
       toast("Сначала вставьте ключ — его выдаёт бот");
@@ -324,8 +332,13 @@ async function onToggleClicked() {
   }
 }
 
-async function openKeyDialog() {
+async function openKeyDialog(mode = "main") {
   if (busy) return;
+  keyDialogMode = mode === "add" ? "add" : "main";
+  el.keyDialogTitle.textContent = keyDialogMode === "add" ? "Новый сервер" : "Ключ доступа";
+  el.keyDialogHelp.textContent = keyDialogMode === "add"
+    ? "Вставьте ключ ещё одного сервера. Основной ключ останется в списке"
+    : "Вставьте ключ, который прислал бот";
   el.input.value = "";
   try {
     const clip = await invoke("clipboard_text");
@@ -349,32 +362,73 @@ async function saveKey() {
     return;
   }
   setBusy(true);
+  let reconnect = false;
   try {
-    if (await invoke("is_demo_key", { text })) {
+    if (keyDialogMode === "add") {
+      reconnect = (await invoke("tunnel_status")).up;
+      const entry = await invoke("add_server", { text });
+      toast(`Сервер добавлен и выбран: ${entry.name}`);
+    } else if (await invoke("is_demo_key", { text })) {
       await invoke("save_demo");
+      await invoke("select_server", { id: null });
+      toast("Ключ сохранён");
     } else {
       const resolved = await invoke("resolve_key", { text });
       await invoke("save_key", { text: resolved.text, code: resolved.code });
+      // Новый основной ключ — значит, подключаться им, а не своим сервером.
+      await invoke("select_server", { id: null });
+      toast("Ключ сохранён");
     }
-    toast("Ключ сохранён");
     closeKeyDialog();
   } catch (err) {
-    toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ из бота целиком и проверьте интернет.`, true);
+    reconnect = false;
+    toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ целиком и проверьте интернет.`, true);
   } finally {
     setBusy(false);
   }
-  await refreshStatus();
+  if (reconnect) {
+    await reconnectWithSavedKey();
+  } else {
+    await refreshStatus();
+  }
 }
 
 // --- смена сервера (страны) ------------------------------------------------
 
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Окно «Сервер»: основной ключ (Россия/США от бота или вставленный конфиг)
+// и свои дополнительные серверы, выбранный подсвечен.
+async function renderServerList() {
+  const list = await invoke("list_servers");
+  const mainSelected = list.selected == null;
+  el.countryRu.hidden = !list.main_switchable;
+  el.countryUs.hidden = !list.main_switchable;
+  el.mainServer.hidden = !list.has_main || list.main_switchable;
+  el.mainServer.textContent = list.main_name || "Основной ключ";
+  el.mainServer.classList.toggle("selected", mainSelected);
+  await highlightCountry(mainSelected && list.main_switchable ? await invoke("current_country") : null);
+  el.extraServers.innerHTML = list.servers.map((server) => {
+    const id = escapeHtml(server.id);
+    const selected = server.id === list.selected ? " selected" : "";
+    return `<div class="server-row">
+      <button class="flat-button country-button${selected}" data-server="${id}">${escapeHtml(server.name)}</button>
+      <button class="server-remove" data-remove="${id}" aria-label="Удалить сервер" title="Удалить сервер">✕</button>
+    </div>`;
+  }).join("");
+  return list;
+}
+
 async function openCountryDialog() {
   if (busy) return;
-  if (!(await invoke("has_switchable_code"))) {
-    toast("Смена сервера доступна только для ключа, который выдал бот");
+  try {
+    await renderServerList();
+  } catch (err) {
+    toast(`Не удалось открыть список серверов: ${messageOf(err)}`, true);
     return;
   }
-  await highlightCountry(await invoke("current_country"));
   el.overlayCountry.hidden = false;
 }
 
@@ -391,7 +445,8 @@ async function chooseCountry(country) {
   if (busy || togglePending) return;
   setBusy(true);
   try {
-    if ((await invoke("current_country")) === country) {
+    const list = await invoke("list_servers");
+    if (list.selected == null && (await invoke("current_country")) === country) {
       closeCountryDialog();
       return;
     }
@@ -413,12 +468,62 @@ async function chooseCountry(country) {
   }
 }
 
+// Свой сервер или основной ключ (id = null).
+async function chooseServer(id) {
+  if (busy || togglePending) return;
+  setBusy(true);
+  let reconnect = false;
+  try {
+    const list = await invoke("list_servers");
+    if ((list.selected ?? null) === id) {
+      closeCountryDialog();
+      return;
+    }
+    reconnect = (await invoke("tunnel_status")).up;
+    await invoke("select_server", { id });
+    toast("Сервер изменён");
+    closeCountryDialog();
+  } catch (err) {
+    reconnect = false;
+    toast(`Не получилось сменить сервер: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+  }
+  if (reconnect) {
+    await reconnectWithSavedKey();
+  } else {
+    await refreshStatus();
+  }
+}
+
+async function removeServer(id) {
+  if (busy || togglePending) return;
+  setBusy(true);
+  let reconnect = false;
+  try {
+    const wasSelected = await invoke("remove_server", { id });
+    reconnect = wasSelected && (await invoke("tunnel_status")).up;
+    toast("Сервер удалён из списка");
+    await renderServerList();
+  } catch (err) {
+    toast(`Не получилось удалить сервер: ${messageOf(err)}`, true);
+  } finally {
+    setBusy(false);
+  }
+  // Удалили сервер, через который были подключены, — переходим на основной ключ.
+  if (reconnect) {
+    await reconnectWithSavedKey();
+  } else {
+    await refreshStatus();
+  }
+}
+
 async function reconnectWithSavedKey() {
   setBusy(true);
   try {
     // Do not start a new install if stopping the previous tunnel failed.
     await invoke("disconnect");
-    const key = await invoke("load_key");
+    const key = await invoke("active_config");
     if (key) await invoke("connect", { configText: key });
   } catch (err) {
     toast(`Не удалось переподключиться: ${messageOf(err)}`, true);
@@ -433,9 +538,24 @@ el.ipRow.addEventListener("click", openCountryDialog);
 el.countryRu.addEventListener("click", () => chooseCountry("ru"));
 el.countryUs.addEventListener("click", () => chooseCountry("us"));
 el.countryCancel.addEventListener("click", closeCountryDialog);
+el.mainServer.addEventListener("click", () => chooseServer(null));
+el.addServer.addEventListener("click", () => {
+  if (busy || togglePending) return;
+  closeCountryDialog();
+  openKeyDialog("add");
+});
+el.extraServers.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-server], [data-remove]");
+  if (!target) return;
+  if (target.dataset.remove) {
+    removeServer(target.dataset.remove);
+  } else {
+    chooseServer(target.dataset.server);
+  }
+});
 
 el.toggle.addEventListener("click", onToggleClicked);
-el.keyButton.addEventListener("click", openKeyDialog);
+el.keyButton.addEventListener("click", () => openKeyDialog("main"));
 el.cancel.addEventListener("click", closeKeyDialog);
 el.done.addEventListener("click", saveKey);
 el.pasteButton.addEventListener("click", async () => {
