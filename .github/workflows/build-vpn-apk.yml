@@ -22,7 +22,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # По умолчанию действие ставит пакет "tools", которого в репозитории
+      # Google больше нет (sdkmanager падает с "Failed to find package
+      # 'tools'"). Нужен только platform-tools, остальное ставится ниже.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
       - name: Компоненты Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
