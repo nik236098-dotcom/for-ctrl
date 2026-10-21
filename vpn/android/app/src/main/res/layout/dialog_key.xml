@@ -8,6 +8,7 @@
     android:padding="24dp">
 
     <TextView
+        android:id="@+id/textKeyTitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:fontFamily="@font/jetbrains_mono_bold"
@@ -17,6 +18,7 @@
         android:textSize="22sp" />
 
     <TextView
+        android:id="@+id/textKeyHelp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"

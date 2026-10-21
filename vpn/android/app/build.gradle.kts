@@ -11,8 +11,8 @@ android {
         applicationId = "ru.forctrl.ruvpn"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         // Адрес сервера ключей: короткий ключ, который вставляет человек,
         // приложение меняет здесь на настоящий конфиг тунеля. Задаётся при

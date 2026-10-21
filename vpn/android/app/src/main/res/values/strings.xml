@@ -32,7 +32,8 @@
     <string name="error_permission_denied">Без разрешения на VPN связи не будет</string>
     <string name="error_connect">Не удалось соединиться: %1$s</string>
     <string name="error_disconnect">Не удалось разъединиться: %1$s</string>
-    <string name="error_key_dead">Впн не работает — этот ключ больше не действует. Вставьте новый (его выдаёт бот).</string>
+    <string name="error_key_dead">Сервер подтвердил: доступ по ключу отключён. Проверьте подписку или получите ключ в боте.</string>
+    <string name="status_waiting">Ждём ответа сервера…</string>
 
     <string name="power_button_description">Кнопка соединения</string>
 
@@ -44,4 +45,14 @@
     <string name="server_changed">Сервер изменён</string>
     <string name="error_no_switch">Смена сервера доступна только для ключа, который выдал бот</string>
     <string name="error_switch_failed">Не получилось сменить сервер: %1$s</string>
+
+    <string name="main_key">Основной ключ</string>
+    <string name="add_server">+ Добавить сервер</string>
+    <string name="add_server_title">Новый сервер</string>
+    <string name="add_server_help">Вставьте ключ ещё одного сервера. Основной ключ останется в списке</string>
+    <string name="server_added">Сервер добавлен и выбран: %1$s</string>
+    <string name="server_removed">Сервер удалён из списка</string>
+    <string name="remove_server_confirm">Удалить «%1$s» из списка?</string>
+    <string name="remove">Удалить</string>
+    <string name="remove_server_description">Удалить сервер</string>
 </resources>

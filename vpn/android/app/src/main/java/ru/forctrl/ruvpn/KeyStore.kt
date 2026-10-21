@@ -5,6 +5,7 @@ import android.util.Base64
 import com.wireguard.config.Config
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -70,6 +71,8 @@ object KeyStore {
     fun save(context: Context, text: String, code: String?) {
         savedFile(context).writeText(text.trim())
         writeMeta(context, code, DEFAULT_COUNTRY)
+        // Новый основной ключ — значит, подключаться им, а не своим сервером.
+        selectServer(context, null)
     }
 
     /** Тестовый ключ — только чтобы посмотреть анимацию кнопки, без
@@ -92,9 +95,11 @@ object KeyStore {
     fun saveDemo(context: Context) {
         savedFile(context).writeText(DEMO_SENTINEL)
         writeMeta(context, code = null, country = DEFAULT_COUNTRY)
+        selectServer(context, null)
     }
 
-    fun isDemo(context: Context): Boolean = rawText(context) == DEMO_SENTINEL
+    fun isDemo(context: Context): Boolean =
+        servers(context).selected == null && rawText(context) == DEMO_SENTINEL
 
     /** Быстрая проверка «похоже на ключ» — чтобы подставлять из буфера обмена. */
     fun looksLikeKey(text: String?): Boolean {
@@ -155,13 +160,160 @@ object KeyStore {
     suspend fun switchCountry(context: Context, country: String): Boolean {
         val meta = readMeta(context) ?: return false
         val code = meta.code ?: return false
-        if (meta.country == country) return true
-        val text = fetchConfig(code, country)
-        parse(text) // проверка, что сервер отдал настоящий конфиг тунеля
-        savedFile(context).writeText(text.trim())
-        writeMeta(context, code, country)
+        if (meta.country != country) {
+            val text = fetchConfig(code, country)
+            parse(text) // проверка, что сервер отдал настоящий конфиг тунеля
+            savedFile(context).writeText(text.trim())
+            writeMeta(context, code, country)
+        }
+        // Выбор страны — это выбор основного ключа.
+        selectServer(context, null)
         return true
     }
+
+    /**
+     * Статус ключа на собственном сервере ключей: "active", "revoked",
+     * "unknown" (сеть, таймаут, старый сервер без /status, любой
+     * неожиданный ответ) или "unmanaged" (ключ не от бота / выбран свой
+     * сервер). Отключать туннель можно только по явному "revoked" — сбой
+     * сервиса проверки IP ничего не говорит о ключе.
+     */
+    suspend fun keyStatus(context: Context): String {
+        if (servers(context).selected != null) return "unmanaged"
+        val meta = readMeta(context) ?: return "unmanaged"
+        val code = meta.code?.takeIf { isShortCode(it) } ?: return "unmanaged"
+        val base = BuildConfig.KEY_SERVER_URL.trimEnd('/')
+        if (base.isBlank()) return "unknown"
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val connection =
+                    (URL("$base/key/$code/status?country=${meta.country}").openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10_000
+                        readTimeout = 10_000
+                        requestMethod = "GET"
+                    }
+                try {
+                    if (connection.responseCode != 200) {
+                        "unknown"
+                    } else {
+                        val body = connection.inputStream.bufferedReader().use { it.readText() }
+                        when (JSONObject(body).optString("status")) {
+                            "active" -> "active"
+                            "revoked" -> "revoked"
+                            else -> "unknown"
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }.getOrDefault("unknown")
+        }
+    }
+
+    // --- свои серверы рядом с основным ключом --------------------------------
+
+    /**
+     * Дополнительные серверы (например, запасной): полные конфиги WireGuard,
+     * между которыми можно переключаться в окне «Сервер». Основной ключ
+     * (key.txt) при этом остаётся как есть. [Servers.selected] = null —
+     * подключаемся основным ключом.
+     */
+    data class Server(val id: String, val name: String, val config: String)
+
+    data class Servers(val selected: String?, val list: List<Server>)
+
+    private const val SERVERS_FILE = "servers.json"
+
+    private fun serversFile(context: Context) = File(context.filesDir, SERVERS_FILE)
+
+    fun servers(context: Context): Servers {
+        val file = serversFile(context)
+        if (!file.exists()) return Servers(null, emptyList())
+        return runCatching {
+            val json = JSONObject(file.readText())
+            val array = json.optJSONArray("servers") ?: JSONArray()
+            val list = (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                Server(item.optString("id"), item.optString("name"), item.optString("config"))
+                    .takeIf { it.id.isNotBlank() && it.config.isNotBlank() }
+            }
+            // Выбранный сервер, которого уже нет, означает «основной ключ».
+            val selected = json.optString("selected").takeIf { id -> list.any { it.id == id } }
+            Servers(selected, list)
+        }.getOrDefault(Servers(null, emptyList()))
+    }
+
+    private fun writeServers(context: Context, servers: Servers) {
+        val array = JSONArray()
+        servers.list.forEach {
+            array.put(JSONObject().put("id", it.id).put("name", it.name).put("config", it.config))
+        }
+        val json = JSONObject()
+            .put("selected", servers.selected ?: JSONObject.NULL)
+            .put("servers", array)
+        serversFile(context).writeText(json.toString())
+    }
+
+    /** Добавляет проверенный конфиг и сразу выбирает его; тот же конфиг второй раз не дублируется. */
+    fun addServer(context: Context, text: String): Server {
+        val trimmed = text.trim()
+        val config = parse(trimmed) // неверный конфиг — исключение, список не трогаем
+        val current = servers(context)
+        current.list.firstOrNull { it.config == trimmed }?.let { existing ->
+            writeServers(context, current.copy(selected = existing.id))
+            return existing
+        }
+        val base = hostName(config) ?: "Сервер"
+        var name = base
+        var n = 2
+        while (current.list.any { it.name == name }) {
+            name = "$base ($n)"
+            n++
+        }
+        val server = Server(System.currentTimeMillis().toString(), name, trimmed)
+        writeServers(context, Servers(server.id, current.list + server))
+        return server
+    }
+
+    /** id = null — снова основной ключ. */
+    fun selectServer(context: Context, id: String?) {
+        val current = servers(context)
+        if (current.list.isEmpty() && id == null) return
+        val selected = id?.takeIf { wanted -> current.list.any { it.id == wanted } }
+        writeServers(context, current.copy(selected = selected))
+    }
+
+    /** true — удалили выбранный сервер, подключение перешло на основной ключ. */
+    fun removeServer(context: Context, id: String): Boolean {
+        val current = servers(context)
+        val wasSelected = current.selected == id
+        writeServers(
+            context,
+            Servers(if (wasSelected) null else current.selected, current.list.filterNot { it.id == id }),
+        )
+        return wasSelected
+    }
+
+    /** Текст конфига, которым подключаться сейчас: свой выбранный сервер или основной ключ. */
+    fun activeText(context: Context): String? {
+        val current = servers(context)
+        return current.list.firstOrNull { it.id == current.selected }?.config ?: rawText(context)
+    }
+
+    /** Есть ли настоящий основной ключ (не тестовый). */
+    fun hasMainKey(context: Context): Boolean =
+        rawText(context)?.let { it != DEMO_SENTINEL } == true
+
+    /** «Сервер <адрес>» для основного ключа, вставленного готовым конфигом. */
+    fun mainName(context: Context): String? {
+        val text = rawText(context)?.takeIf { it != DEMO_SENTINEL } ?: return null
+        return runCatching { hostName(parse(text)) }.getOrNull()
+    }
+
+    private fun hostName(config: Config): String? =
+        config.peers.firstOrNull()?.endpoint?.orElse(null)?.host
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "Сервер $it" }
 
     private data class Meta(val code: String?, val country: String)
 

@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.button.MaterialButton
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
 import kotlinx.coroutines.delay
@@ -21,6 +22,7 @@ import kotlinx.coroutines.launch
 import ru.forctrl.ruvpn.databinding.ActivityMainBinding
 import ru.forctrl.ruvpn.databinding.DialogCountryBinding
 import ru.forctrl.ruvpn.databinding.DialogKeyBinding
+import ru.forctrl.ruvpn.databinding.ItemServerBinding
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -35,15 +37,15 @@ class MainActivity : AppCompatActivity() {
     private var demoUp = false
 
     /**
-     * Служба тунеля и реальный пир на сервере — два независимых состояния:
-     * /drop, истечение подписки и т.п. снимают пира на сервере, но
-     * локальный WireGuard-тунель остаётся Tunnel.State.UP как ни в чём не
-     * бывало. Раньше приложение в этом случае продолжало честно писать
-     * "Впн включен", хотя реального интернета через тунель не было вообще.
-     * Считаем несколько подряд неудачных проверок айпи (не одну — чтобы не
-     * среагировать на случайный сетевой сбой) признаком мёртвого ключа.
+     * Сколько раз подряд собственный сервер ключей явно ответил "revoked".
+     * Только это — повод отключить туннель самим. Сбой сервиса проверки IP
+     * о ключе ничего не говорит (раньше по нему туннель отключался зря,
+     * как и в Windows-версии до 0.1.1).
      */
-    private var ipFailureStreak = 0
+    private var revokedStreak = 0
+
+    /** Растёт при каждом подключении/переключении — старые проверки отбрасываются. */
+    private var connectionGeneration = 0
 
     /** Разрешение системы на VPN — спрашивается один раз на установку. */
     private val vpnPermission = registerForActivityResult(
@@ -84,11 +86,8 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
-                    // 8, а не 15 секунд: connect()/reconnectWithSavedKey() уже делают
-                    // первую проверку сразу при подключении — этот тик нужен только
-                    // чтобы как можно быстрее набрать вторую (подтверждающую) неудачу
-                    // подряд, не заставляя ждать почти минуту, если ключ мёртв сразу.
-                    delay(8_000)
+                    // IP и статус ключа проверяются раз в 30 секунд, как в Windows.
+                    delay(30_000)
                     watchKeyStillWorks()
                 }
             }
@@ -184,8 +183,12 @@ class MainActivity : AppCompatActivity() {
      * уже в буфере обмена — подставляем сразу; можно и явно нажать
      * «Вставить из буфера» — на случай, если автоопределение промахнулось.
      */
-    private fun showKeyDialog() {
+    private fun showKeyDialog(forNewServer: Boolean = false) {
         val dialogBinding = DialogKeyBinding.inflate(layoutInflater)
+        if (forNewServer) {
+            dialogBinding.textKeyTitle.setText(R.string.add_server_title)
+            dialogBinding.textKeyHelp.setText(R.string.add_server_help)
+        }
         dialogBinding.inputKey.setText(clipboardText(onlyIfLooksLikeKey = true) ?: "")
 
         val dialog = AlertDialog.Builder(this)
@@ -199,7 +202,8 @@ class MainActivity : AppCompatActivity() {
         }
         dialogBinding.textCancel.setOnClickListener { dialog.dismiss() }
         dialogBinding.textDone.setOnClickListener {
-            saveKey(dialogBinding.inputKey.text.toString())
+            val text = dialogBinding.inputKey.text.toString()
+            if (forNewServer) addServer(text) else saveKey(text)
             dialog.dismiss()
         }
 
@@ -241,35 +245,77 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Клик по своему ip: если сохранённый ключ пришёл коротким кодом от
-     * бота — можно сменить страну (тот же код переспрашивается у сервера
-     * ключей с другим параметром страны, второй ключ вводить не нужно).
-     * Для вставленного вручную конфига или старого base64-ключа кода нет —
-     * тогда просто подсказываем, что нужен ключ от бота.
+     * Свой сервер рядом с основным ключом (например, запасной). Основной
+     * ключ не меняется; новый сервер сразу выбирается, и если VPN был
+     * включён — переподключаемся через него.
+     */
+    private fun addServer(text: String) {
+        if (text.isBlank()) return
+        val wasUp = VpnManager.state.value == Tunnel.State.UP
+        lifecycleScope.launch {
+            runCatching {
+                val resolved = KeyStore.resolve(text)
+                KeyStore.addServer(this@MainActivity, resolved.text)
+            }
+                .onSuccess { server ->
+                    toast(getString(R.string.server_added, server.name))
+                    if (wasUp) reconnectWithSavedKey() else render(VpnManager.state.value)
+                }
+                .onFailure { toast(getString(R.string.error_bad_key, it.messageOrClass())) }
+        }
+    }
+
+    /**
+     * Клик по своему ip — окно «Сервер»: основной ключ (Россия/США, если он
+     * от бота, иначе одна кнопка с адресом сервера), свои серверы и
+     * «+ Добавить сервер». Выбранный подсвечен.
      */
     private fun showCountryDialog() {
-        if (!KeyStore.hasSwitchableCode(this)) {
-            toast(getString(R.string.error_no_switch))
-            return
-        }
+        if (busy) return
         val dialogBinding = DialogCountryBinding.inflate(layoutInflater)
         val dialog = AlertDialog.Builder(this).setView(dialogBinding.root).create()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
 
-        fun highlight(selected: String) {
-            for ((button, country) in listOf(
-                dialogBinding.buttonCountryRu to "ru",
-                dialogBinding.buttonCountryUs to "us",
-            )) {
-                val on = selected == country
-                button.setBackgroundColor(getColor(if (on) R.color.cyan else android.R.color.transparent))
-                button.setTextColor(getColor(if (on) R.color.space_deep else R.color.cyan))
+        fun paint(button: MaterialButton, on: Boolean) {
+            button.setBackgroundColor(getColor(if (on) R.color.cyan else android.R.color.transparent))
+            button.setTextColor(getColor(if (on) R.color.space_deep else R.color.cyan))
+        }
+
+        fun refresh() {
+            val servers = KeyStore.servers(this)
+            val switchable = KeyStore.hasSwitchableCode(this)
+            val mainSelected = servers.selected == null
+            val country = KeyStore.currentCountry(this)
+            val countryVisibility = if (switchable) View.VISIBLE else View.GONE
+            dialogBinding.buttonCountryRu.visibility = countryVisibility
+            dialogBinding.buttonCountryUs.visibility = countryVisibility
+            paint(dialogBinding.buttonCountryRu, mainSelected && country == "ru")
+            paint(dialogBinding.buttonCountryUs, mainSelected && country == "us")
+            dialogBinding.buttonMainServer.visibility =
+                if (KeyStore.hasMainKey(this) && !switchable) View.VISIBLE else View.GONE
+            dialogBinding.buttonMainServer.text =
+                KeyStore.mainName(this) ?: getString(R.string.main_key)
+            paint(dialogBinding.buttonMainServer, mainSelected)
+
+            dialogBinding.containerServers.removeAllViews()
+            for (server in servers.list) {
+                val row = ItemServerBinding.inflate(layoutInflater, dialogBinding.containerServers, false)
+                row.buttonServer.text = server.name
+                paint(row.buttonServer, server.id == servers.selected)
+                row.buttonServer.setOnClickListener { chooseServer(server.id, dialog) }
+                row.buttonRemove.setOnClickListener { confirmRemoveServer(server) { refresh() } }
+                dialogBinding.containerServers.addView(row.root)
             }
         }
-        highlight(KeyStore.currentCountry(this))
+        refresh()
 
-        dialogBinding.buttonCountryRu.setOnClickListener { switchCountry("ru", dialog, ::highlight) }
-        dialogBinding.buttonCountryUs.setOnClickListener { switchCountry("us", dialog, ::highlight) }
+        dialogBinding.buttonCountryRu.setOnClickListener { switchCountry("ru", dialog) }
+        dialogBinding.buttonCountryUs.setOnClickListener { switchCountry("us", dialog) }
+        dialogBinding.buttonMainServer.setOnClickListener { chooseServer(null, dialog) }
+        dialogBinding.buttonAddServer.setOnClickListener {
+            dialog.dismiss()
+            showKeyDialog(forNewServer = true)
+        }
         dialogBinding.textCountryCancel.setOnClickListener { dialog.dismiss() }
 
         dialog.show()
@@ -279,8 +325,46 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun switchCountry(country: String, dialog: AlertDialog, highlight: (String) -> Unit) {
-        if (KeyStore.currentCountry(this) == country) {
+    /** Свой сервер или основной ключ (id = null). */
+    private fun chooseServer(id: String?, dialog: AlertDialog) {
+        if (busy) return
+        if (KeyStore.servers(this).selected == id) {
+            dialog.dismiss()
+            return
+        }
+        val wasUp = VpnManager.state.value == Tunnel.State.UP
+        KeyStore.selectServer(this, id)
+        toast(getString(R.string.server_changed))
+        dialog.dismiss()
+        if (wasUp) {
+            lifecycleScope.launch { reconnectWithSavedKey() }
+        } else {
+            render(VpnManager.state.value)
+        }
+    }
+
+    private fun confirmRemoveServer(server: KeyStore.Server, onRemoved: () -> Unit) {
+        if (busy) return
+        AlertDialog.Builder(this)
+            .setMessage(getString(R.string.remove_server_confirm, server.name))
+            .setPositiveButton(R.string.remove) { _, _ ->
+                val wasSelected = KeyStore.removeServer(this, server.id)
+                toast(getString(R.string.server_removed))
+                onRemoved()
+                // Удалили сервер, через который были подключены, — переходим на основной ключ.
+                if (wasSelected && VpnManager.state.value == Tunnel.State.UP) {
+                    lifecycleScope.launch { reconnectWithSavedKey() }
+                } else {
+                    render(VpnManager.state.value)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun switchCountry(country: String, dialog: AlertDialog) {
+        if (busy) return
+        if (KeyStore.servers(this).selected == null && KeyStore.currentCountry(this) == country) {
             dialog.dismiss()
             return
         }
@@ -292,10 +376,9 @@ class MainActivity : AppCompatActivity() {
                         toast(getString(R.string.error_no_switch))
                         return@onSuccess
                     }
-                    highlight(country)
                     toast(getString(R.string.server_changed))
                     dialog.dismiss()
-                    if (wasUp) reconnectWithSavedKey()
+                    if (wasUp) reconnectWithSavedKey() else render(VpnManager.state.value)
                 }
                 .onFailure { toast(getString(R.string.error_switch_failed, it.messageOrClass())) }
         }
@@ -346,26 +429,31 @@ class MainActivity : AppCompatActivity() {
             .isSuccess
 
     /**
-     * Пока тунель "включен", раз в 8 секунд тихо проверяем айпи (плюс сразу
-     * же при подключении — см. connect()/reconnectWithSavedKey()). Два
-     * подряд неудачных обращения — тунель локально поднят, а ключ на
-     * сервере больше не работает (см. комментарий у [ipFailureStreak]).
-     * В этом случае сами отключаемся и честно говорим об этом, вместо
-     * того чтобы бесконечно висеть "включенным" без реального интернета.
+     * Пока тунель включён, раз в 30 секунд (и сразу после подключения)
+     * обновляем «Ваш ip» и спрашиваем у собственного сервера ключей статус
+     * ключа. Отключаемся сами только после двух подряд явных "revoked".
+     * Неудачная проверка IP, таймаут, старый сервер без /status — это
+     * «неизвестно», туннель остаётся включённым. Свои серверы и вставленные
+     * вручную конфиги боту не подчиняются и не проверяются вовсе.
      */
     private suspend fun watchKeyStillWorks() {
         if (busy || KeyStore.isDemo(this)) return
+        val generation = connectionGeneration
         if (VpnManager.state.value != Tunnel.State.UP) {
-            ipFailureStreak = 0
+            revokedStreak = 0
             return
         }
-        if (refreshIp()) {
-            ipFailureStreak = 0
+        refreshIp()
+        val status = KeyStore.keyStatus(this)
+        // Пока шла проверка, могли переподключиться или сменить сервер.
+        if (busy || generation != connectionGeneration) return
+        if (status != "revoked") {
+            revokedStreak = 0
             return
         }
-        ipFailureStreak++
-        if (ipFailureStreak >= 2) {
-            ipFailureStreak = 0
+        revokedStreak++
+        if (revokedStreak >= 2) {
+            revokedStreak = 0
             handleDeadKey()
         }
     }
@@ -387,7 +475,7 @@ class MainActivity : AppCompatActivity() {
     // --- отрисовка ----------------------------------------------------------
 
     private fun currentConfig(): Config? {
-        val text = KeyStore.rawText(this) ?: return null
+        val text = KeyStore.activeText(this) ?: return null
         return runCatching { KeyStore.parse(text) }.getOrNull()
     }
 
@@ -414,8 +502,8 @@ class MainActivity : AppCompatActivity() {
         binding.buttonKey.setText(
             if (hasAnyKey) R.string.replace_key else R.string.paste_key,
         )
-        binding.textChangeServerHint.visibility =
-            if (KeyStore.hasSwitchableCode(this)) View.VISIBLE else View.GONE
+        // Окно «Сервер» доступно всегда: в нём же добавляются свои серверы.
+        binding.textChangeServerHint.visibility = View.VISIBLE
         if (!up) {
             binding.textReceived.text = getString(R.string.traffic_placeholder)
             binding.textSent.text = getString(R.string.traffic_placeholder)
@@ -427,9 +515,20 @@ class MainActivity : AppCompatActivity() {
         val stats = VpnManager.statistics() ?: return
         binding.textReceived.text = formatBytes(stats.totalRx())
         binding.textSent.text = formatBytes(stats.totalTx())
+        if (busy || KeyStore.isDemo(this)) return
+        // Туннель поднят, но сервер ещё ни разу не ответил — трафика нет.
+        val answered = stats.peers().any { key ->
+            (stats.peer(key)?.latestHandshakeEpochMillis() ?: 0L) > 0L
+        }
+        binding.textStatus.setText(if (answered) R.string.status_connected else R.string.status_waiting)
     }
 
     private fun setBusy(busy: Boolean) {
+        if (busy) {
+            // Ответ старой проверки не должен отключить новое соединение.
+            connectionGeneration++
+            revokedStreak = 0
+        }
         this.busy = busy
         binding.buttonToggle.isEnabled = !busy
         binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
