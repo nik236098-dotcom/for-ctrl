@@ -29,7 +29,6 @@ remove_client.sh / suspend_client.sh работают и с такими уст�
     RUVPN_PARAMS           /etc/wireguard/ruvpn.params
 """
 import base64
-import fcntl
 import json
 import os
 import re
@@ -37,6 +36,11 @@ import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    import fcntl  # есть только на Linux/macOS, где и работает служба
+except ImportError:  # тесты на Windows-машине CI
+    fcntl = None
 
 DEFAULT_TOKEN = "ruvpn-app-1"
 DEFAULT_ALLOWED_IPS = "0.0.0.0/0, ::/0"
@@ -133,7 +137,8 @@ def register(params_path, public_key, device, max_devices, apply=None):
     conf_path = os.path.join(os.path.dirname(params_path), f"{params['WG_IFACE']}.conf")
     with _lock, open(conf_path + ".lock", "w") as lock_file:
         # Межпроцессная блокировка: add_client.sh и бот могут писать тот же файл.
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
         with open(conf_path, encoding="utf-8") as f:
             conf_text = f.read()
 
