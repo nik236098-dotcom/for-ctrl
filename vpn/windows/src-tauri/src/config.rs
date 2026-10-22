@@ -169,11 +169,13 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
 
 /// Проверяет конфиг целиком (тем же разбором, что и при подключении) и
 /// возвращает нормализованный текст для сохранения.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn validate(text: &str) -> Result<String, String> {
     parse(text)?;
     Ok(text.trim().trim_start_matches('\u{feff}').trim().to_string())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn write_validated(path: &Path, text: &str) -> Result<(), String> {
     let validated = validate(text)?;
     fs::write(path, validated).map_err(|e| e.to_string())

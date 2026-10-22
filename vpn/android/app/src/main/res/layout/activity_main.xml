@@ -44,9 +44,7 @@
 
             <!-- Ваш ip: значок глобуса того же размера, что и текст, флаг
                  страны — обычный эмодзи, система рисует его сама. Кликом
-                 открывается выбор сервера (см. dialog_country.xml) —
-                 подсказка под ней показывается, только если сохранённый
-                 ключ вообще можно переключить (см. KeyStore.hasSwitchableCode). -->
+                 открывается выбор сервера (см. dialog_country.xml). -->
             <LinearLayout
                 android:id="@+id/ipRow"
                 android:layout_width="wrap_content"
@@ -85,8 +83,7 @@
                 android:fontFamily="@font/jetbrains_mono_regular"
                 android:text="@string/change_server_hint"
                 android:textColor="@color/ink_soft"
-                android:textSize="12sp"
-                android:visibility="gone" />
+                android:textSize="12sp" />
 
             <!-- Растягивается на весь свободный остаток — заголовок и IP не
                  липнут к кнопке, а кнопка не липнет к верху экрана. -->
@@ -213,12 +210,13 @@
                 android:layout_height="0dp"
                 android:layout_weight="1" />
 
+            <!-- Текущий сервер; нажатие открывает выбор (dialog_country.xml). -->
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/buttonKey"
+                android:id="@+id/buttonServer"
                 style="@style/Widget.RuVPN.Button.Flat"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/paste_key" />
+                android:text="@string/server_button_empty" />
         </LinearLayout>
     </ScrollView>
 </FrameLayout>

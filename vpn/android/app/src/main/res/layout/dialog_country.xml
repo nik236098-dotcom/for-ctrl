@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Выбор сервера: встроенный список (assets/servers.json), без ключей. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_dialog_card"
@@ -26,44 +26,12 @@
         android:textColor="@color/ink_soft"
         android:textSize="14sp" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonMainServer"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/main_key"
-        android:visibility="gone" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonCountryRu"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/country_ru" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonCountryUs"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/country_us" />
-
     <LinearLayout
         android:id="@+id/containerServers"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:orientation="vertical" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonAddServer"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/add_server" />
 
     <TextView
         android:id="@+id/textCountryCancel"

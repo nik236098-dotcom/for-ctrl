@@ -1,0 +1,5 @@
+[
+  {"id": "ru", "name": "Россия", "country": "RU", "host": "77.91.72.22"},
+  {"id": "ru-old", "name": "Россия 2", "country": "RU", "host": "77.91.92.108"},
+  {"id": "us", "name": "США", "country": "US", "host": "69.40.207.38"}
+]

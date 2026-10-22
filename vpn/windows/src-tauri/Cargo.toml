@@ -1,6 +1,6 @@
 [package]
 name = "ruvpn-windows"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "Ru VPN — клиент WireGuard для Windows со встроенным драйвером WireGuardNT"
 
@@ -18,9 +18,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "process", "sync"] }
 base64 = "0.22"
 ipnet = "2"
-# Чтение буфера обмена для кнопки «Вставить из буфера» и автоподстановки —
-# то же самое, что ClipboardManager на Android.
-arboard = "3"
+# Ключ WireGuard этого компьютера создаётся прямо здесь (provision.rs).
+x25519-dalek = "2"
+getrandom = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # Обёртка над wireguard.dll (WireGuardNT — драйвер официального WireGuard,

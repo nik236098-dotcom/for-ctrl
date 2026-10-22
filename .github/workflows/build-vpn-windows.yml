@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "vpn/windows/**"
+      - "vpn/shared/**"
+      - "vpn/server/provision.py"
       - ".github/workflows/build-vpn-windows.yml"
   workflow_dispatch:
 
@@ -20,7 +22,10 @@ jobs:
       - name: Проверка сетевых сбоев Windows-клиента
         run: node --test vpn/windows/tests/connection-health.test.cjs
 
-      - name: Проверка статуса подписки и ключа
+      - name: Проверка регистрации устройств на сервере
+        run: python -m unittest discover -s vpn/server/tests -p "test_*.py"
+
+      - name: Проверка бота
         run: python -m unittest discover -s vpn/bot/tests -p "test_*.py"
 
       # Драйвер туннеля встроен в установщик: официальный wireguard.dll
@@ -61,19 +66,12 @@ jobs:
       - name: Установка tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Проверка разбора ключа и ответов сервера ключей
+      - name: Проверка разбора конфига и регистрации
         working-directory: vpn/windows/src-tauri
-        env:
-          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
         run: cargo test --release
 
-      # Адрес сервера ключей: приложение меняет на него короткий ключ
-      # (8 символов) на настоящий конфиг тунеля при вставке — тот же секрет,
-      # что и для Android-сборки. Без него вставка короткого кода не сработает.
       - name: Сборка установщика
         working-directory: vpn/windows/src-tauri
-        env:
-          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
         run: cargo tauri build
 
       - uses: actions/upload-artifact@v4

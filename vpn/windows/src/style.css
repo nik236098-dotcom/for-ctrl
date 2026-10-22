@@ -400,35 +400,3 @@ body {
   font-size: 13px;
   text-align: center;
 }
-
-/* --- дополнительные серверы в окне «Сервер» --- */
-
-.server-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.server-row .flat-button {
-  margin-top: 0;
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.server-remove {
-  width: 52px;
-  flex: none;
-  border-radius: 18px;
-  background: transparent;
-  border: 2px solid var(--ink-soft);
-  color: var(--ink-soft);
-  font-size: 18px;
-  cursor: pointer;
-}
-
-.server-remove:hover {
-  border-color: var(--cyan);
-  color: var(--cyan);
-}

@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "vpn/android/**"
+      - "vpn/shared/**"
       - ".github/workflows/build-vpn-apk.yml"
   workflow_dispatch:
 
@@ -36,30 +37,11 @@ jobs:
         with:
           gradle-version: "8.14.3"
 
-      # Если в секретах репозитория лежит WG_CONFIG (содержимое клиентского
-      # .conf), он вшивается в APK — приложение подключится в одно нажатие.
-      # Без секрета собирается «пустой» APK, конфиг импортируется в самом
-      # приложении.
-      - name: Встроить конфиг из секрета
-        env:
-          WG_CONFIG: ${{ secrets.WG_CONFIG }}
-        run: |
-          if [ -n "$WG_CONFIG" ]; then
-            printf '%s' "$WG_CONFIG" > vpn/android/app/src/main/assets/wg.conf
-            echo "конфиг встроен в сборку"
-          else
-            echo "секрет WG_CONFIG не задан — собираем без встроенного конфига"
-          fi
-
-      # Адрес сервера ключей: приложение меняет на него короткий ключ
-      # (8 символов) на настоящий конфиг тунеля при вставке. Без секрета
-      # KEY_SERVER_URL вставка короткого ключа не сработает — останется
-      # только конфиг, вшитый через WG_CONFIG выше.
+      # Ключей нет: серверы зашиты в приложение (vpn/shared/servers.json),
+      # телефон сам регистрируется на сервере при первом подключении.
       - name: Сборка debug-APK
         working-directory: vpn/android
-        env:
-          KEY_SERVER_URL: ${{ secrets.KEY_SERVER_URL }}
-        run: gradle --no-daemon assembleDebug -PkeyServerUrl="$KEY_SERVER_URL"
+        run: gradle --no-daemon assembleDebug
 
       - uses: actions/upload-artifact@v4
         with:
@@ -80,6 +62,6 @@ jobs:
             --title "RU VPN — debug APK" \
             --notes "Клиент WireGuard для Android, собран из коммита $GITHUB_SHA.
 
-          Конфиг внутрь не вшит: после установки импортируйте .conf,
-          который выдаёт vpn/server/add_client.sh на вашем сервере.
-          Подпись отладочная — для личного устройства этого достаточно."
+          Без ключей: выберите сервер и нажмите кнопку — телефон сам
+          зарегистрируется на нём (на сервере должна работать служба
+          vpn/server/install_provision.sh). Подпись отладочная."

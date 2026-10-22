@@ -11,19 +11,16 @@ android {
         applicationId = "ru.forctrl.ruvpn"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "2.0"
+    }
 
-        // Адрес сервера ключей: короткий ключ, который вставляет человек,
-        // приложение меняет здесь на настоящий конфиг тунеля. Задаётся при
-        // сборке (-PkeyServerUrl=http://ваш.сервер:8081), в CI — из секрета
-        // KEY_SERVER_URL. Пусто — вставка короткого ключа не сработает,
-        // остаётся только встроенный в сборку конфиг (assets/wg.conf).
-        buildConfigField(
-            "String",
-            "KEY_SERVER_URL",
-            "\"${(project.findProperty("keyServerUrl") as? String).orEmpty()}\"",
-        )
+    // Список серверов — общий с Windows-версией (vpn/shared/servers.json),
+    // попадает в assets как servers.json.
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets", "../../shared")
+        }
     }
 
     buildTypes {

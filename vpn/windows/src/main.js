@@ -1,9 +1,10 @@
 const invoke = window.__TAURI__.core.invoke;
 
+// Ключей нет: сервер выбирается из списка, при первом подключении
+// компьютер сам регистрируется на нём (см. src-tauri/src/provision.rs).
 const el = {
   ip: document.getElementById("textIp"),
   ipRow: document.getElementById("ipRow"),
-  changeServerHint: document.getElementById("textChangeServerHint"),
   powerOff: document.getElementById("imagePowerOff"),
   powerOn: document.getElementById("imagePowerOn"),
   toggle: document.getElementById("buttonToggle"),
@@ -11,38 +12,20 @@ const el = {
   connectingRing: document.getElementById("connectingRing"),
   received: document.getElementById("textReceived"),
   sent: document.getElementById("textSent"),
-  keyButton: document.getElementById("buttonKey"),
-  overlay: document.getElementById("overlay"),
-  input: document.getElementById("inputKey"),
-  pasteButton: document.getElementById("buttonPasteClipboard"),
-  cancel: document.getElementById("textCancel"),
-  done: document.getElementById("textDone"),
+  serverButton: document.getElementById("buttonServer"),
   overlayCountry: document.getElementById("overlayCountry"),
-  countryRu: document.getElementById("buttonCountryRu"),
-  countryUs: document.getElementById("buttonCountryUs"),
+  serverList: document.getElementById("serverList"),
   countryCancel: document.getElementById("textCountryCancel"),
-  mainServer: document.getElementById("buttonMainServer"),
-  extraServers: document.getElementById("extraServers"),
-  addServer: document.getElementById("buttonAddServer"),
-  keyDialogTitle: document.getElementById("keyDialogTitle"),
-  keyDialogHelp: document.getElementById("keyDialogHelp"),
   toast: document.getElementById("toast"),
   ipFlag: document.getElementById("ipFlag"),
 };
 
-// Пока идёт подключение/отключение — статус показывает «Наводим связь…»,
-// как и на Android.
+// Пока идёт подключение/отключение — статус показывает «Наводим связь…».
 let busy = false;
-// Тестовый ключ (test1590): только анимация кнопки, без настоящего тунеля.
-let demoUp = false;
 let toastTimer = null;
 let connectionGeneration = 0;
-let revokedKeyStreak = 0;
-let watchingConnection = false;
 let togglePending = false;
 let statusRefresh = null;
-// Окно ключа открыто для основного ключа ("main") или для нового сервера ("add").
-let keyDialogMode = "main";
 
 function checkIsCurrent(generation) {
   return !busy && generation === connectionGeneration;
@@ -110,28 +93,18 @@ function flagSvg(countryCode) {
   return "";
 }
 
-async function hasAnyKey() {
-  const key = await invoke("load_key");
-  return key != null && key !== "";
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 async function render(up) {
-  const isDemo = await invoke("is_demo");
-  const shown = isDemo ? demoUp : up;
-
-  el.powerOn.classList.toggle("up", shown);
-  el.toggle.setAttribute("aria-label", shown ? "Разъединить" : "Соединить");
-
+  el.powerOn.classList.toggle("up", up);
+  el.toggle.setAttribute("aria-label", up ? "Разъединить" : "Соединить");
   if (!busy) {
-    el.status.textContent = shown ? "Впн включен" : "Впн выключен";
-    el.status.classList.toggle("up", shown);
+    el.status.textContent = up ? "Впн включен" : "Впн выключен";
+    el.status.classList.toggle("up", up);
   }
-
-  el.keyButton.textContent = (await hasAnyKey()) ? "Заменить ключ" : "Вставить ключ";
-  // Окно «Сервер» доступно всегда: в нём же добавляются свои серверы.
-  el.changeServerHint.hidden = false;
-
-  if (!shown) {
+  if (!up) {
     el.received.textContent = "0 КБ";
     el.sent.textContent = "0 КБ";
     el.received.classList.remove("up");
@@ -139,11 +112,20 @@ async function render(up) {
   }
 }
 
+async function renderServerButton() {
+  try {
+    const list = await invoke("list_servers");
+    const current = list.servers.find((s) => s.id === list.selected);
+    el.serverButton.textContent = current ? `Сервер: ${current.name}` : "Сервер";
+  } catch {
+    el.serverButton.textContent = "Сервер";
+  }
+}
+
 function setBusy(value) {
   if (value) {
-    // Ответ старой проверки не должен отключить новое соединение/ключ.
+    // Ответ старой проверки не должен повлиять на новое соединение.
     connectionGeneration++;
-    revokedKeyStreak = 0;
   }
   busy = value;
   el.toggle.disabled = value || togglePending;
@@ -165,11 +147,7 @@ async function refreshStatus() {
       if (generation !== connectionGeneration || busy) return status.up;
       await render(status.up);
       if (generation !== connectionGeneration || busy) return status.up;
-      el.connectingRing.hidden = !status.transitioning;
-      if (status.transitioning) {
-        el.status.textContent = status.state === "starting" ? "Туннель запускается…" : "Туннель останавливается…";
-        el.toggle.setAttribute("aria-label", "Остановить туннель");
-      }
+      el.connectingRing.hidden = true;
       if (status.up) {
         el.received.textContent = formatBytes(status.rx);
         el.sent.textContent = formatBytes(status.tx);
@@ -193,6 +171,7 @@ async function refreshStatus() {
   return statusRefresh;
 }
 
+// Только показывает IP. Неудачная проверка IP никогда не отключает VPN.
 async function checkIp(generation = connectionGeneration) {
   try {
     const result = await invoke("check_ip");
@@ -208,90 +187,17 @@ async function checkIp(generation = connectionGeneration) {
   }
 }
 
-// IP-сервис показывает адрес, но ничего не знает о действительности ключа.
-// Отключение разрешено только после двух явных ответов собственного сервера
-// ключей. Таймаут, ошибка DNS, HTTP 404 старого сервера и HTTP 5xx — unknown.
-async function watchConnection() {
-  if (busy || watchingConnection) return;
-  watchingConnection = true;
-  const generation = connectionGeneration;
-  try {
-    if (await invoke("is_demo")) return;
-    const status = await invoke("tunnel_status");
-    if (!checkIsCurrent(generation)) return;
-    if (!status.up) {
-      revokedKeyStreak = 0;
-      return;
-    }
-    const [, keyResult] = await Promise.allSettled([
-      checkIp(generation),
-      invoke("key_status"),
-    ]);
-    if (!checkIsCurrent(generation)) return;
-    const state = keyResult.status === "fulfilled" ? keyResult.value : "unknown";
-    if (state !== "revoked") {
-      revokedKeyStreak = 0;
-      return;
-    }
-    revokedKeyStreak++;
-    if (revokedKeyStreak >= 2) await handleRevokedKey(generation);
-  } catch {
-    // Ошибка опроса/IPC не является отзывом ключа. Следующий тик повторит.
-    if (checkIsCurrent(generation)) revokedKeyStreak = 0;
-  } finally {
-    watchingConnection = false;
-  }
-}
-
-async function handleRevokedKey(generation) {
-  if (!checkIsCurrent(generation)) return;
-  setBusy(true);
-  try {
-    await invoke("disconnect");
-    toast("Сервер подтвердил: доступ по ключу отключён. Проверьте подписку или получите ключ в боте.", true);
-  } catch (err) {
-    toast(`Ключ отключён на сервере. Не удалось остановить туннель: ${messageOf(err)}`, true);
-  } finally {
-    setBusy(false);
-  }
-  await refreshStatus();
-  checkIp();
-}
-
-async function toggleDemo() {
-  if (demoUp) {
-    demoUp = false;
-    await render(false);
-    return;
-  }
-  setBusy(true);
-  setTimeout(async () => {
-    demoUp = true;
-    setBusy(false);
-    await render(false);
-  }, 900);
-}
-
 async function connectReal() {
   setBusy(true);
-  let missingKey = false;
   try {
-    const key = await invoke("active_config");
-    if (!key) {
-      missingKey = true;
-      toast("Сначала вставьте ключ — его выдаёт бот");
-      return;
-    }
-    await invoke("connect", { configText: key });
+    await invoke("connect");
   } catch (err) {
-    missingKey = messageOf(err).startsWith("Неверная конфигурация VPN:");
     toast(`Не удалось соединиться: ${messageOf(err)}`, true);
   } finally {
     setBusy(false);
     await refreshStatus();
-    if (missingKey) await openKeyDialog();
   }
-  watchConnection();
+  checkIp();
 }
 
 async function disconnectReal() {
@@ -308,17 +214,13 @@ async function disconnectReal() {
 }
 
 async function onToggleClicked() {
-  // Acquire before the first await so a double click cannot issue two installs.
+  // Acquire before the first await so a double click cannot connect twice.
   if (busy || togglePending) return;
   togglePending = true;
   el.toggle.disabled = true;
   try {
-    if (await invoke("is_demo")) {
-      await toggleDemo();
-      return;
-    }
     const status = await invoke("tunnel_status");
-    if (status.up || status.transitioning) {
+    if (status.up) {
       await disconnectReal();
     } else {
       await connectReal();
@@ -332,99 +234,18 @@ async function onToggleClicked() {
   }
 }
 
-async function openKeyDialog(mode = "main") {
-  if (busy) return;
-  keyDialogMode = mode === "add" ? "add" : "main";
-  el.keyDialogTitle.textContent = keyDialogMode === "add" ? "Новый сервер" : "Ключ доступа";
-  el.keyDialogHelp.textContent = keyDialogMode === "add"
-    ? "Вставьте ключ ещё одного сервера. Основной ключ останется в списке"
-    : "Вставьте ключ, который прислал бот";
-  el.input.value = "";
-  try {
-    const clip = await invoke("clipboard_text");
-    el.input.value = clip && (await invoke("looks_like_key", { text: clip })) ? clip.trim() : "";
-  } catch (_) {
-    // A busy clipboard must not prevent replacing a damaged saved key.
-  }
-  el.overlay.hidden = false;
-  el.input.focus();
-}
+// --- выбор сервера ---------------------------------------------------------
 
-function closeKeyDialog() {
-  el.overlay.hidden = true;
-}
-
-async function saveKey() {
-  if (busy || togglePending) return;
-  const text = el.input.value;
-  if (!text || !text.trim()) {
-    closeKeyDialog();
-    return;
-  }
-  setBusy(true);
-  let reconnect = false;
-  try {
-    if (keyDialogMode === "add") {
-      reconnect = (await invoke("tunnel_status")).up;
-      const entry = await invoke("add_server", { text });
-      toast(`Сервер добавлен и выбран: ${entry.name}`);
-    } else if (await invoke("is_demo_key", { text })) {
-      await invoke("save_demo");
-      await invoke("select_server", { id: null });
-      toast("Ключ сохранён");
-    } else {
-      const resolved = await invoke("resolve_key", { text });
-      await invoke("save_key", { text: resolved.text, code: resolved.code });
-      // Новый основной ключ — значит, подключаться им, а не своим сервером.
-      await invoke("select_server", { id: null });
-      toast("Ключ сохранён");
-    }
-    closeKeyDialog();
-  } catch (err) {
-    reconnect = false;
-    toast(`Не получилось: ${messageOf(err)}. Скопируйте ключ целиком и проверьте интернет.`, true);
-  } finally {
-    setBusy(false);
-  }
-  if (reconnect) {
-    await reconnectWithSavedKey();
-  } else {
-    await refreshStatus();
-  }
-}
-
-// --- смена сервера (страны) ------------------------------------------------
-
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-// Окно «Сервер»: основной ключ (Россия/США от бота или вставленный конфиг)
-// и свои дополнительные серверы, выбранный подсвечен.
-async function renderServerList() {
-  const list = await invoke("list_servers");
-  const mainSelected = list.selected == null;
-  el.countryRu.hidden = !list.main_switchable;
-  el.countryUs.hidden = !list.main_switchable;
-  el.mainServer.hidden = !list.has_main || list.main_switchable;
-  el.mainServer.textContent = list.main_name || "Основной ключ";
-  el.mainServer.classList.toggle("selected", mainSelected);
-  await highlightCountry(mainSelected && list.main_switchable ? await invoke("current_country") : null);
-  el.extraServers.innerHTML = list.servers.map((server) => {
-    const id = escapeHtml(server.id);
-    const selected = server.id === list.selected ? " selected" : "";
-    return `<div class="server-row">
-      <button class="flat-button country-button${selected}" data-server="${id}">${escapeHtml(server.name)}</button>
-      <button class="server-remove" data-remove="${id}" aria-label="Удалить сервер" title="Удалить сервер">✕</button>
-    </div>`;
-  }).join("");
-  return list;
-}
-
-async function openCountryDialog() {
+async function openServerDialog() {
   if (busy) return;
   try {
-    await renderServerList();
+    const list = await invoke("list_servers");
+    el.serverList.innerHTML = list.servers.map((server) => {
+      const selected = server.id === list.selected ? " selected" : "";
+      return `<button class="flat-button country-button${selected}" data-server="${escapeHtml(server.id)}">
+        ${flagSvg(server.country)} ${escapeHtml(server.name)}
+      </button>`;
+    }).join("");
   } catch (err) {
     toast(`Не удалось открыть список серверов: ${messageOf(err)}`, true);
     return;
@@ -432,142 +253,67 @@ async function openCountryDialog() {
   el.overlayCountry.hidden = false;
 }
 
-function closeCountryDialog() {
+function closeServerDialog() {
   el.overlayCountry.hidden = true;
 }
 
-async function highlightCountry(selected) {
-  el.countryRu.classList.toggle("selected", selected === "ru");
-  el.countryUs.classList.toggle("selected", selected === "us");
-}
-
-async function chooseCountry(country) {
-  if (busy || togglePending) return;
-  setBusy(true);
-  try {
-    const list = await invoke("list_servers");
-    if (list.selected == null && (await invoke("current_country")) === country) {
-      closeCountryDialog();
-      return;
-    }
-    const wasUp = (await invoke("tunnel_status")).up;
-    const changed = await invoke("switch_country", { country });
-    if (!changed) {
-      toast("Смена сервера доступна только для ключа, который выдал бот");
-      return;
-    }
-    await highlightCountry(country);
-    toast("Сервер изменён");
-    closeCountryDialog();
-    if (wasUp) await reconnectWithSavedKey();
-  } catch (err) {
-    toast(`Не получилось сменить сервер: ${messageOf(err)}`, true);
-  } finally {
-    setBusy(false);
-    await refreshStatus();
-  }
-}
-
-// Свой сервер или основной ключ (id = null).
 async function chooseServer(id) {
   if (busy || togglePending) return;
   setBusy(true);
   let reconnect = false;
   try {
     const list = await invoke("list_servers");
-    if ((list.selected ?? null) === id) {
-      closeCountryDialog();
+    if (list.selected === id) {
+      closeServerDialog();
       return;
     }
     reconnect = (await invoke("tunnel_status")).up;
     await invoke("select_server", { id });
+    closeServerDialog();
     toast("Сервер изменён");
-    closeCountryDialog();
   } catch (err) {
     reconnect = false;
     toast(`Не получилось сменить сервер: ${messageOf(err)}`, true);
   } finally {
     setBusy(false);
   }
+  await renderServerButton();
   if (reconnect) {
-    await reconnectWithSavedKey();
+    await reconnectToSelected();
   } else {
     await refreshStatus();
   }
 }
 
-async function removeServer(id) {
-  if (busy || togglePending) return;
-  setBusy(true);
-  let reconnect = false;
-  try {
-    const wasSelected = await invoke("remove_server", { id });
-    reconnect = wasSelected && (await invoke("tunnel_status")).up;
-    toast("Сервер удалён из списка");
-    await renderServerList();
-  } catch (err) {
-    toast(`Не получилось удалить сервер: ${messageOf(err)}`, true);
-  } finally {
-    setBusy(false);
-  }
-  // Удалили сервер, через который были подключены, — переходим на основной ключ.
-  if (reconnect) {
-    await reconnectWithSavedKey();
-  } else {
-    await refreshStatus();
-  }
-}
-
-async function reconnectWithSavedKey() {
+async function reconnectToSelected() {
   setBusy(true);
   try {
-    // Do not start a new install if stopping the previous tunnel failed.
+    // Не подключаемся заново, если старый туннель не остановился.
     await invoke("disconnect");
-    const key = await invoke("active_config");
-    if (key) await invoke("connect", { configText: key });
+    await invoke("connect");
   } catch (err) {
     toast(`Не удалось переподключиться: ${messageOf(err)}`, true);
   } finally {
     setBusy(false);
     await refreshStatus();
   }
-  watchConnection();
+  checkIp();
 }
 
-el.ipRow.addEventListener("click", openCountryDialog);
-el.countryRu.addEventListener("click", () => chooseCountry("ru"));
-el.countryUs.addEventListener("click", () => chooseCountry("us"));
-el.countryCancel.addEventListener("click", closeCountryDialog);
-el.mainServer.addEventListener("click", () => chooseServer(null));
-el.addServer.addEventListener("click", () => {
-  if (busy || togglePending) return;
-  closeCountryDialog();
-  openKeyDialog("add");
+el.ipRow.addEventListener("click", openServerDialog);
+el.serverButton.addEventListener("click", openServerDialog);
+el.countryCancel.addEventListener("click", closeServerDialog);
+el.serverList.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-server]");
+  if (target) chooseServer(target.dataset.server);
 });
-el.extraServers.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-server], [data-remove]");
-  if (!target) return;
-  if (target.dataset.remove) {
-    removeServer(target.dataset.remove);
-  } else {
-    chooseServer(target.dataset.server);
-  }
-});
-
 el.toggle.addEventListener("click", onToggleClicked);
-el.keyButton.addEventListener("click", () => openKeyDialog("main"));
-el.cancel.addEventListener("click", closeKeyDialog);
-el.done.addEventListener("click", saveKey);
-el.pasteButton.addEventListener("click", async () => {
-  const clip = await invoke("clipboard_text");
-  if (clip) el.input.value = clip.trim();
-});
 
 (async () => {
+  await renderServerButton();
   await refreshStatus();
   checkIp();
   setInterval(refreshStatus, 2000);
-  // IP и доступ по ключу проверяются независимо; частый опрос не нужен.
-  setInterval(watchConnection, 30000);
+  // IP обновляется раз в 30 секунд; на подключение это не влияет.
+  setInterval(checkIp, 30000);
 })();
-

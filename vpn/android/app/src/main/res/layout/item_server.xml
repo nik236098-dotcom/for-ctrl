@@ -1,27 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Строка своего сервера в окне «Сервер»: выбрать и удалить. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Строка сервера в окне выбора. -->
+<com.google.android.material.button.MaterialButton xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/buttonServer"
+    style="@style/Widget.RuVPN.Button.Flat"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="12dp"
-    android:orientation="horizontal">
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonServer"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/buttonRemove"
-        style="@style/Widget.RuVPN.Button.Flat"
-        android:layout_width="56dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:contentDescription="@string/remove_server_description"
-        android:minWidth="0dp"
-        android:paddingStart="0dp"
-        android:paddingEnd="0dp"
-        android:text="✕" />
-</LinearLayout>
+    android:layout_marginTop="12dp" />

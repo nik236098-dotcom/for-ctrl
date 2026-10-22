@@ -6,12 +6,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <!--
-        usesCleartextTraffic: сервер ключей — обычно голый http:// на свежем
-        VDS без домена и сертификата (KeyStore.kt, KEY_SERVER_URL), Android
-        9+ такой трафик блокирует по умолчанию. Компромисс осознанный: тем
-        же запросом передаётся приватный ключ WireGuard, так что как
-        появится домен — стоит поставить перед сервером ключей HTTPS
-        (например, Let's Encrypt через Caddy/nginx) и снять этот флаг.
+        usesCleartextTraffic: регистрация устройства на сервере идёт по
+        голому http:// (VDS без домена и сертификата, см. Provisioning.kt),
+        Android 9+ такой трафик блокирует по умолчанию. Приватный ключ при
+        этом не передаётся — он создаётся и остаётся на телефоне, на сервер
+        уходит только публичный.
     -->
     <application
         android:allowBackup="false"
