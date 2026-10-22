@@ -1,0 +1,100 @@
+name: Сборка Windows-приложения RU VPN
+
+on:
+  push:
+    paths:
+      - "vpn/windows/**"
+      - "vpn/shared/**"
+      - "vpn/server/provision.py"
+      - ".github/workflows/build-vpn-windows.yml"
+  workflow_dispatch:
+
+# Нужно для публикации установщика в релиз.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Проверка сетевых сбоев Windows-клиента
+        run: node --test vpn/windows/tests/connection-health.test.cjs
+
+      - name: Проверка регистрации устройств на сервере
+        run: python -m unittest discover -s vpn/server/tests -p "test_*.py"
+
+      - name: Проверка бота
+        run: python -m unittest discover -s vpn/bot/tests -p "test_*.py"
+
+      # Драйвер туннеля встроен в установщик: официальный wireguard.dll
+      # (WireGuardNT) — именно в том виде, в каком его раздаёт
+      # download.wireguard.com (так требует README самого WireGuardNT).
+      # Берём последнюю версию и не пропускаем файл без действующей подписи
+      # WireGuard LLC.
+      - name: Драйвер WireGuardNT
+        shell: pwsh
+        run: |
+          $base = "https://download.wireguard.com/wireguard-nt/"
+          $index = (Invoke-WebRequest -UseBasicParsing $base).Content
+          $latest = [regex]::Matches($index, 'wireguard-nt-(\d+(?:\.\d+)+)\.zip') |
+            Sort-Object { [version]$_.Groups[1].Value } -Descending |
+            Select-Object -First 1
+          if (-not $latest) { throw "На $base не найден архив wireguard-nt" }
+          $zip = Join-Path $env:RUNNER_TEMP $latest.Value
+          $dir = Join-Path $env:RUNNER_TEMP "wireguard-nt"
+          Invoke-WebRequest -UseBasicParsing ($base + $latest.Value) -OutFile $zip
+          Expand-Archive $zip -DestinationPath $dir -Force
+          $dll = Get-ChildItem $dir -Recurse -Filter wireguard.dll |
+            Where-Object { $_.FullName -match '\\amd64\\' } | Select-Object -First 1
+          if (-not $dll) { throw "В архиве нет bin/amd64/wireguard.dll" }
+          $sig = Get-AuthenticodeSignature $dll.FullName
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'WireGuard LLC') {
+            throw "Подпись wireguard.dll не прошла проверку: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          New-Item -ItemType Directory -Force vpn/windows/src-tauri/resources | Out-Null
+          Copy-Item $dll.FullName vpn/windows/src-tauri/resources/wireguard.dll
+          Write-Host "WireGuardNT $($latest.Groups[1].Value), подпись: $($sig.SignerCertificate.Subject)"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vpn/windows/src-tauri
+
+      - name: Установка tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Проверка разбора конфига и регистрации
+        working-directory: vpn/windows/src-tauri
+        run: cargo test --release
+
+      - name: Сборка установщика
+        working-directory: vpn/windows/src-tauri
+        run: cargo tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruvpn-windows-installer
+          path: vpn/windows/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      # Готовый установщик кладём в релиз с постоянным тегом
+      # ruvpn-windows-latest — оттуда его можно скачать по прямой ссылке.
+      - name: Публикация установщика в релиз
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp vpn/windows/src-tauri/target/release/bundle/nsis/*.exe ruvpn-windows-setup.exe
+          gh release delete ruvpn-windows-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ruvpn-windows-latest ruvpn-windows-setup.exe \
+            --target "$GITHUB_SHA" \
+            --title "RU VPN — установщик для Windows" \
+            --notes "Клиент WireGuard для Windows, собран из коммита $GITHUB_SHA.
+
+          Драйвер туннеля (официальный WireGuardNT) встроен в установщик:
+          отдельный WireGuard ставить не нужно, служб Windows приложение не
+          создаёт. Требует прав администратора (запрашиваются один раз при
+          запуске). VPN работает, пока открыто приложение."

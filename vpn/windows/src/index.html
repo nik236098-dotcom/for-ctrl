@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Ru VPN</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <img class="bg" src="assets/space_bg.png" alt="" />
+
+  <div class="screen">
+    <h1 class="title">Ru VPN</h1>
+
+    <button id="ipRow" class="ip-row">
+      <img class="globe" src="assets/ic_globe.png" alt="" />
+      <span id="textIp">Ваш ip: …</span>
+      <span id="ipFlag" class="ip-flag"></span>
+    </button>
+    <div id="textChangeServerHint" class="change-server-hint">Нажмите, чтобы сменить</div>
+
+    <div class="spacer"></div>
+
+    <div class="power-wrap">
+      <img id="imagePowerOff" class="power power-off" src="assets/power_off.png" alt="" />
+      <img id="imagePowerOn" class="power power-on" src="assets/power_on.png" alt="" />
+      <div id="connectingRing" class="connecting-ring" hidden></div>
+      <button id="buttonToggle" class="power-hit" aria-label="Кнопка соединения"></button>
+    </div>
+
+    <div id="textStatus" class="status">Впн выключен</div>
+
+    <div class="traffic-row">
+      <div class="traffic-col">
+        <span class="traffic-label">Получено</span>
+        <span id="textReceived" class="traffic-value">0 КБ</span>
+      </div>
+      <div class="traffic-col">
+        <span class="traffic-label">Отправлено</span>
+        <span id="textSent" class="traffic-value">0 КБ</span>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <button id="buttonServer" class="flat-button">Сервер</button>
+  </div>
+
+  <div id="overlayCountry" class="overlay" hidden>
+    <div class="dialog-card">
+      <div class="dialog-title">Сервер</div>
+      <div class="dialog-help">Откуда будет ваш ip</div>
+      <div id="serverList" class="server-list"></div>
+      <button id="textCountryCancel" class="country-cancel">Отмена</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="main.js"></script>
+</body>
+</html>

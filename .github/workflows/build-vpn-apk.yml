@@ -1,0 +1,67 @@
+name: Сборка APK RU VPN
+
+on:
+  push:
+    paths:
+      - "vpn/android/**"
+      - "vpn/shared/**"
+      - ".github/workflows/build-vpn-apk.yml"
+  workflow_dispatch:
+
+# Нужно для публикации APK в релиз.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # По умолчанию действие ставит пакет "tools", которого в репозитории
+      # Google больше нет (sdkmanager падает с "Failed to find package
+      # 'tools'"). Нужен только platform-tools, остальное ставится ниже.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Компоненты Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      # Ключей нет: серверы зашиты в приложение (vpn/shared/servers.json),
+      # телефон сам регистрируется на сервере при первом подключении.
+      - name: Сборка debug-APK
+        working-directory: vpn/android
+        run: gradle --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ruvpn-debug-apk
+          path: vpn/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # Готовый APK кладём в релиз с постоянным тегом ruvpn-latest —
+      # оттуда его можно скачать по прямой ссылке, в том числе с телефона.
+      - name: Публикация APK в релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp vpn/android/app/build/outputs/apk/debug/app-debug.apk ruvpn-debug.apk
+          gh release delete ruvpn-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ruvpn-latest ruvpn-debug.apk \
+            --target "$GITHUB_SHA" \
+            --title "RU VPN — debug APK" \
+            --notes "Клиент WireGuard для Android, собран из коммита $GITHUB_SHA.
+
+          Без ключей: выберите сервер и нажмите кнопку — телефон сам
+          зарегистрируется на нём (на сервере должна работать служба
+          vpn/server/install_provision.sh). Подпись отладочная."
